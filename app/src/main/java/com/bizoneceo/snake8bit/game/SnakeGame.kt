@@ -54,6 +54,9 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
     var started by mutableStateOf(false)
         private set
 
+    var paused by mutableStateOf(false)
+        private set
+
     /** Increments on every start() call so the game loop can key off a value
      * that is guaranteed to change even when reset() + start() happen inside
      * the same event (started would otherwise end up back at its old value
@@ -70,7 +73,13 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
 
     fun start() {
         started = true
+        paused = false
         runId++
+    }
+
+    fun togglePause() {
+        if (!started || gameOver) return
+        paused = !paused
     }
 
     fun reset() {
@@ -92,6 +101,7 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
         score = 0
         gameOver = false
         started = false
+        paused = false
         spawnApple()
     }
 
@@ -101,7 +111,7 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
     }
 
     fun tick() {
-        if (gameOver || !started) return
+        if (gameOver || !started || paused) return
 
         direction = pendingDirection
         val head = snake.first()

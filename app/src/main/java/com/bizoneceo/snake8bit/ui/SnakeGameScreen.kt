@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bizoneceo.snake8bit.R
+import com.bizoneceo.snake8bit.audio.SoundEngine
 import com.bizoneceo.snake8bit.game.Direction
 import com.bizoneceo.snake8bit.game.SnakeGame
 import com.bizoneceo.snake8bit.ui.theme.AppleColor
@@ -51,6 +52,13 @@ fun SnakeGameScreen() {
 
     LaunchedEffectGameLoop(game)
 
+    LaunchedEffect(game.score) {
+        if (game.score > 0) SoundEngine.playEat()
+    }
+    LaunchedEffect(game.gameOver) {
+        if (game.gameOver) SoundEngine.playGameOver()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -65,13 +73,20 @@ fun SnakeGameScreen() {
     }
 }
 
+/** How often to re-check for an unpause while the game is paused. */
+private const val PauseCheckIntervalMs = 80L
+
 @Composable
 private fun LaunchedEffectGameLoop(game: SnakeGame) {
     LaunchedEffect(game.runId) {
         if (game.runId == 0) return@LaunchedEffect
         while (!game.gameOver) {
-            delay(game.tickDelayMillis())
-            game.tick()
+            if (game.paused) {
+                delay(PauseCheckIntervalMs)
+            } else {
+                delay(game.tickDelayMillis())
+                game.tick()
+            }
         }
     }
 }
@@ -80,21 +95,51 @@ private fun LaunchedEffectGameLoop(game: SnakeGame) {
 private fun Hud(game: SnakeGame) {
     Row(
         modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            text = stringResource(R.string.score_label, game.score),
-            color = HudText,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
+        PauseButton(
+            paused = game.paused,
+            enabled = game.started && !game.gameOver,
+            onClick = {
+                game.togglePause()
+                SoundEngine.playPauseToggle()
+            },
         )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(
+                text = stringResource(R.string.score_label, game.score),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+            )
+            Text(
+                text = stringResource(R.string.length_label, game.snake.size),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PauseButton(paused: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .background(PixelDark, RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
         Text(
-            text = stringResource(R.string.length_label, game.snake.size),
+            text = if (paused) "▶" else "⏸",
             color = HudText,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
+            fontSize = 16.sp,
         )
     }
 }
@@ -156,6 +201,14 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
         if (!game.started && !game.gameOver) {
             StartOverlay(onStart = game::start)
         }
+        if (game.started && !game.gameOver && game.paused) {
+            PausedOverlay(
+                onResume = {
+                    game.togglePause()
+                    SoundEngine.playPauseToggle()
+                },
+            )
+        }
         if (game.gameOver) {
             GameOverOverlay(
                 score = game.score,
@@ -200,6 +253,36 @@ private fun StartOverlay(onStart: () -> Unit) {
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PausedOverlay(onResume: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(OverlayScrim)
+            .clickable(onClick = onResume),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = stringResource(R.string.paused_title),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(modifier = Modifier.size(16.dp))
+            Text(
+                text = stringResource(R.string.tap_to_resume),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp,
                 textAlign = TextAlign.Center,
             )
         }
