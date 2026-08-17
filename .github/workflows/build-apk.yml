@@ -1,0 +1,59 @@
+name: Build Snake APK
+
+on:
+  push:
+    branches:
+      - claude/android-app-k4o05m
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/build-apk.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk snake-8bit-debug.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snake-8bit-apk
+          path: snake-8bit-debug.apk
+
+      - name: Publish/refresh download release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: snake-apk-latest
+          name: "Змейка 8-бит (сборка ${{ github.run_number }})"
+          body: |
+            Автоматическая сборка debug-APK из ветки `${{ github.ref_name }}`.
+            Скачайте `snake-8bit-debug.apk` ниже и установите на телефоне
+            (разрешите установку из неизвестных источников при первом запросе).
+          files: snake-8bit-debug.apk
+          make_latest: true
