@@ -36,6 +36,7 @@ import com.bizoneceo.snake8bit.game.Direction
 import com.bizoneceo.snake8bit.game.SnakeGame
 import com.bizoneceo.snake8bit.ui.theme.AppleColor
 import com.bizoneceo.snake8bit.ui.theme.HudText
+import com.bizoneceo.snake8bit.ui.theme.ObstacleColor
 import com.bizoneceo.snake8bit.ui.theme.OverlayScrim
 import com.bizoneceo.snake8bit.ui.theme.PixelDark
 import com.bizoneceo.snake8bit.ui.theme.PixelDarkest
@@ -104,6 +105,8 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
         modifier = modifier.background(PixelDark),
         contentAlignment = Alignment.Center,
     ) {
+        // The whole board fits on screen at once; the grid is small enough
+        // that this still gives each cell a chunky, clearly-visible size.
         val cellSize = minOf(maxWidth / game.cols, maxHeight / game.rows)
         val boardWidth = cellSize * game.cols
         val boardHeight = cellSize * game.rows
@@ -126,6 +129,14 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
         ) {
             val cellPx = size.width / game.cols
             val gap = cellPx * 0.15f
+
+            game.obstacles.forEach { point ->
+                drawRect(
+                    color = ObstacleColor,
+                    topLeft = Offset(point.x * cellPx + gap / 2, point.y * cellPx + gap / 2),
+                    size = Size(cellPx - gap, cellPx - gap),
+                )
+            }
 
             game.snake.forEachIndexed { index, point ->
                 drawRect(

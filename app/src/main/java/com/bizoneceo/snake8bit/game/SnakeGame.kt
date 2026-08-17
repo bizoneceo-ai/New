@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlin.math.abs
 import kotlin.random.Random
 
 enum class Direction(val dx: Int, val dy: Int) {
@@ -22,10 +23,15 @@ data class Point(val x: Int, val y: Int) {
 }
 
 /**
- * Classic snake on a large 200x100 grid. The whole grid is rendered on
- * screen at once (tiny cells), which is what gives the 8-bit pixel look.
+ * Classic snake, 8-bit style. Every apple eaten drops a new permanent
+ * obstacle block somewhere on the board; hitting a wall, the snake's own
+ * body, or an obstacle ends the run.
  */
-class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
+class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
+
+    /** Obstacles never spawn within this many cells of the head, so a new
+     * block can't kill the snake on the very next move. */
+    private val obstacleSafeRadius = 2
 
     var direction by mutableStateOf(Direction.RIGHT)
         private set
@@ -33,6 +39,8 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
     private var pendingDirection = Direction.RIGHT
 
     val snake = mutableStateListOf<Point>()
+
+    val obstacles = mutableStateListOf<Point>()
 
     var apple by mutableStateOf(Point(0, 0))
         private set
@@ -54,6 +62,7 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
         private set
 
     private val occupied = HashSet<Point>()
+    private val obstacleSet = HashSet<Point>()
 
     init {
         reset()
@@ -67,6 +76,8 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
     fun reset() {
         snake.clear()
         occupied.clear()
+        obstacles.clear()
+        obstacleSet.clear()
 
         val startX = cols / 2
         val startY = rows / 2
@@ -104,7 +115,8 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
         val willGrow = newHead == apple
         val tail = snake.last()
         val hitsBody = occupied.contains(newHead) && !(newHead == tail && !willGrow)
-        if (hitsBody) {
+        val hitsObstacle = obstacleSet.contains(newHead)
+        if (hitsBody || hitsObstacle) {
             gameOver = true
             return
         }
@@ -115,6 +127,7 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
         if (willGrow) {
             score++
             spawnApple()
+            spawnObstacle()
         } else {
             val removedTail = snake.removeAt(snake.size - 1)
             occupied.remove(removedTail)
@@ -122,15 +135,34 @@ class SnakeGame(val cols: Int = 200, val rows: Int = 100) {
     }
 
     /** Tick delay in ms; speeds up gradually as the snake eats more apples. */
-    fun tickDelayMillis(): Long = (170L - score * 3L).coerceIn(45L, 170L)
+    fun tickDelayMillis(): Long = (170L - score * 3L).coerceIn(60L, 170L)
 
     private fun spawnApple() {
-        while (true) {
+        val candidate = randomFreeCell() ?: return
+        apple = candidate
+    }
+
+    private fun spawnObstacle() {
+        val candidate = randomFreeCell(avoidHead = true) ?: return
+        obstacles.add(candidate)
+        obstacleSet.add(candidate)
+    }
+
+    private fun randomFreeCell(avoidHead: Boolean = false): Point? {
+        val head = snake.firstOrNull()
+        repeat(500) {
             val candidate = Point(Random.nextInt(cols), Random.nextInt(rows))
-            if (!occupied.contains(candidate)) {
-                apple = candidate
-                return
+            val tooCloseToHead = avoidHead && head != null &&
+                abs(candidate.x - head.x) <= obstacleSafeRadius &&
+                abs(candidate.y - head.y) <= obstacleSafeRadius
+            if (!occupied.contains(candidate) &&
+                !obstacleSet.contains(candidate) &&
+                candidate != apple &&
+                !tooCloseToHead
+            ) {
+                return candidate
             }
         }
+        return null
     }
 }
