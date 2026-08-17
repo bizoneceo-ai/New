@@ -15,6 +15,19 @@ android {
         versionName = "1.0"
     }
 
+    // Fixed debug signing key (checked into the repo) so every CI build is
+    // signed identically and installs as an update instead of requiring an
+    // uninstall — a freshly generated debug key per CI run would otherwise
+    // change signature every time and silently block updates on device.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
