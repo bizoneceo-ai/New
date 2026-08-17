@@ -1,0 +1,4 @@
+<resources>
+    <color name="board_bg">#0F380F</color>
+    <color name="status_bar">#071C07</color>
+</resources>

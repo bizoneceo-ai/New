@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Змейка 8-бит</string>
+    <string name="app_title">ЗМЕЙКА 8-БИТ</string>
+    <string name="score_label">СЧЁТ: %1$d</string>
+    <string name="length_label">ДЛИНА: %1$d</string>
+    <string name="tap_to_start">НАЖМИ, ЧТОБЫ НАЧАТЬ</string>
+    <string name="game_over">ИГРА ОКОНЧЕНА</string>
+    <string name="tap_to_restart">НАЖМИ ДЛЯ РЕСТАРТА</string>
+    <string name="swipe_hint">СВАЙПАЙ ИЛИ ЖМИ КНОПКИ</string>
+</resources>
