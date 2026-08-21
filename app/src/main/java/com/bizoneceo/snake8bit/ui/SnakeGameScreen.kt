@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +37,7 @@ import com.bizoneceo.snake8bit.game.SnakeGame
 import com.bizoneceo.snake8bit.ui.theme.AppleColor
 import com.bizoneceo.snake8bit.ui.theme.HudText
 import com.bizoneceo.snake8bit.ui.theme.ObstacleColor
+import com.bizoneceo.snake8bit.ui.theme.ObstacleEdibleColor
 import com.bizoneceo.snake8bit.ui.theme.OverlayScrim
 import com.bizoneceo.snake8bit.ui.theme.PixelDark
 import com.bizoneceo.snake8bit.ui.theme.PixelDarkest
@@ -75,6 +75,11 @@ fun SnakeGameScreen() {
 
 /** How often to re-check for an unpause while the game is paused. */
 private const val PauseCheckIntervalMs = 80L
+
+/** Half-period, in ms, of the gray/red obstacle blink during power mode. */
+private const val ObstacleBlinkHalfPeriodMs = 250L
+
+private fun isBlinkOn(): Boolean = (System.currentTimeMillis() / ObstacleBlinkHalfPeriodMs) % 2 == 0L
 
 @Composable
 private fun LaunchedEffectGameLoop(game: SnakeGame) {
@@ -125,22 +130,33 @@ private fun Hud(game: SnakeGame) {
     }
 }
 
+/** The tappable area is bigger than the visible icon so it's easy to hit
+ * without looking — the extra ring around the icon still counts as a hit. */
+private val PauseTouchTarget = 56.dp
+private val PauseVisibleSize = 40.dp
+
 @Composable
 private fun PauseButton(paused: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .background(PixelDark, RoundedCornerShape(8.dp))
+            .size(PauseTouchTarget)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = if (paused) "▶" else "⏸",
-            color = HudText,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
-        )
+        Box(
+            modifier = Modifier
+                .size(PauseVisibleSize)
+                .background(PixelDark, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (paused) "▶" else "⏸",
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+            )
+        }
     }
 }
 
@@ -175,9 +191,14 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
             val cellPx = size.width / game.cols
             val gap = cellPx * 0.15f
 
+            val obstacleColor = if (game.powerModeActive && isBlinkOn()) {
+                ObstacleEdibleColor
+            } else {
+                ObstacleColor
+            }
             game.obstacles.forEach { point ->
                 drawRect(
-                    color = ObstacleColor,
+                    color = obstacleColor,
                     topLeft = Offset(point.x * cellPx + gap / 2, point.y * cellPx + gap / 2),
                     size = Size(cellPx - gap, cellPx - gap),
                 )
@@ -327,21 +348,30 @@ private fun GameOverOverlay(score: Int, onRestart: () -> Unit) {
     }
 }
 
+/** Each D-pad key sits in a square cell; the cell is the tappable area and
+ * is noticeably bigger than the visible button drawn inside it, so a
+ * slightly-off tap near the edge still registers. */
+private val DPadCell = 76.dp
+private val DPadButtonVisible = 64.dp
+
 @Composable
 private fun DPad(onDirection: (Direction) -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        DPadButton(label = "▲", onClick = { onDirection(Direction.UP) })
-        Spacer(modifier = Modifier.size(4.dp))
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Row {
+            Spacer(modifier = Modifier.size(DPadCell))
+            DPadButton(label = "▲", onClick = { onDirection(Direction.UP) })
+            Spacer(modifier = Modifier.size(DPadCell))
+        }
         Row {
             DPadButton(label = "◀", onClick = { onDirection(Direction.LEFT) })
-            Spacer(modifier = Modifier.width(64.dp))
+            Spacer(modifier = Modifier.size(DPadCell))
             DPadButton(label = "▶", onClick = { onDirection(Direction.RIGHT) })
         }
-        Spacer(modifier = Modifier.size(4.dp))
-        DPadButton(label = "▼", onClick = { onDirection(Direction.DOWN) })
+        Row {
+            Spacer(modifier = Modifier.size(DPadCell))
+            DPadButton(label = "▼", onClick = { onDirection(Direction.DOWN) })
+            Spacer(modifier = Modifier.size(DPadCell))
+        }
     }
 }
 
@@ -349,17 +379,23 @@ private fun DPad(onDirection: (Direction) -> Unit) {
 private fun DPadButton(label: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(56.dp)
-            .background(PixelDark, RoundedCornerShape(8.dp))
+            .size(DPadCell)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = HudText,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 22.sp,
-        )
+        Box(
+            modifier = Modifier
+                .size(DPadButtonVisible)
+                .background(PixelDark, RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = label,
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 26.sp,
+            )
+        }
     }
 }

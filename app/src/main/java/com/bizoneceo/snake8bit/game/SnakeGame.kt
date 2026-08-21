@@ -22,16 +22,22 @@ data class Point(val x: Int, val y: Int) {
     fun moved(direction: Direction): Point = Point(x + direction.dx, y + direction.dy)
 }
 
+private fun wrap(value: Int, size: Int): Int = ((value % size) + size) % size
+
 /**
  * Classic snake, 8-bit style. Every apple eaten drops a new permanent
- * obstacle block somewhere on the board; hitting a wall, the snake's own
- * body, or an obstacle ends the run.
+ * obstacle block somewhere on the board. Walking off an edge wraps the
+ * snake around to the opposite side instead of ending the run. Every 10th
+ * apple opens a short window where obstacles can be eaten like apples.
  */
 class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
 
     /** Obstacles never spawn within this many cells of the head, so a new
      * block can't kill the snake on the very next move. */
     private val obstacleSafeRadius = 2
+
+    private val powerModeDurationMs = 10_000L
+    private val powerModeEveryNApples = 10
 
     var direction by mutableStateOf(Direction.RIGHT)
         private set
@@ -56,6 +62,12 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
 
     var paused by mutableStateOf(false)
         private set
+
+    /** True while obstacles are temporarily edible, like apples. */
+    var powerModeActive by mutableStateOf(false)
+        private set
+
+    private var powerModeEndsAt = 0L
 
     /** Increments on every start() call so the game loop can key off a value
      * that is guaranteed to change even when reset() + start() happen inside
@@ -102,6 +114,8 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
         gameOver = false
         started = false
         paused = false
+        powerModeActive = false
+        powerModeEndsAt = 0L
         spawnApple()
     }
 
@@ -113,19 +127,22 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
     fun tick() {
         if (gameOver || !started || paused) return
 
-        direction = pendingDirection
-        val head = snake.first()
-        val newHead = head.moved(direction)
-
-        if (newHead.x !in 0 until cols || newHead.y !in 0 until rows) {
-            gameOver = true
-            return
+        if (powerModeActive && System.currentTimeMillis() >= powerModeEndsAt) {
+            powerModeActive = false
         }
 
-        val willGrow = newHead == apple
+        direction = pendingDirection
+        val head = snake.first()
+        val rawHead = head.moved(direction)
+        val newHead = Point(wrap(rawHead.x, cols), wrap(rawHead.y, rows))
+
+        val willEatApple = newHead == apple
+        val willEatObstacle = powerModeActive && obstacleSet.contains(newHead)
+        val isGrowing = willEatApple || willEatObstacle
+
         val tail = snake.last()
-        val hitsBody = occupied.contains(newHead) && !(newHead == tail && !willGrow)
-        val hitsObstacle = obstacleSet.contains(newHead)
+        val hitsBody = occupied.contains(newHead) && !(newHead == tail && !isGrowing)
+        val hitsObstacle = !powerModeActive && obstacleSet.contains(newHead)
         if (hitsBody || hitsObstacle) {
             gameOver = true
             return
@@ -134,9 +151,20 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
         snake.add(0, newHead)
         occupied.add(newHead)
 
-        if (willGrow) {
+        if (willEatObstacle) {
+            obstacles.remove(newHead)
+            obstacleSet.remove(newHead)
+        }
+
+        if (isGrowing) {
             score++
-            spawnApple()
+            if (score % powerModeEveryNApples == 0) {
+                powerModeActive = true
+                powerModeEndsAt = System.currentTimeMillis() + powerModeDurationMs
+            }
+            if (willEatApple) {
+                spawnApple()
+            }
             spawnObstacle()
         } else {
             val removedTail = snake.removeAt(snake.size - 1)

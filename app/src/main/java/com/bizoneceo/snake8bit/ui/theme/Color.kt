@@ -12,6 +12,7 @@ val SnakeHead = Color(0xFFC6E06B)
 val SnakeBody = PixelLightest
 val AppleColor = Color(0xFFE94F37)
 val ObstacleColor = Color(0xFF6E6E6E)
+val ObstacleEdibleColor = Color(0xFFFF3B3B)
 
 val HudText = PixelLightest
 val OverlayScrim = Color(0xCC071C07)
