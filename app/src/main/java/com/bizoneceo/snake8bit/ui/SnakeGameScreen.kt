@@ -1,5 +1,6 @@
 package com.bizoneceo.snake8bit.ui
 
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,16 +19,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bizoneceo.snake8bit.R
@@ -46,9 +52,16 @@ import com.bizoneceo.snake8bit.ui.theme.SnakeHead
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
+private const val PrefsName = "snake_prefs"
+private const val KeyDpadOnRight = "dpad_on_right"
+
 @Composable
 fun SnakeGameScreen() {
     val game = remember { SnakeGame() }
+
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PrefsName, Context.MODE_PRIVATE) }
+    var dpadOnRight by remember { mutableStateOf(prefs.getBoolean(KeyDpadOnRight, true)) }
 
     LaunchedEffectGameLoop(game)
 
@@ -65,11 +78,26 @@ fun SnakeGameScreen() {
             .background(PixelDarkest)
             .padding(12.dp),
     ) {
-        Hud(game)
+        Hud(
+            game = game,
+            dpadOnRight = dpadOnRight,
+            onToggleDpadSide = {
+                dpadOnRight = !dpadOnRight
+                prefs.edit().putBoolean(KeyDpadOnRight, dpadOnRight).apply()
+                SoundEngine.playPauseToggle()
+            },
+        )
         Spacer(modifier = Modifier.size(8.dp))
         GameBoard(game, modifier = Modifier.weight(1f).fillMaxWidth())
         Spacer(modifier = Modifier.size(12.dp))
-        DPad(onDirection = game::queueDirection)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            DPad(
+                onDirection = game::queueDirection,
+                modifier = Modifier.align(
+                    if (dpadOnRight) Alignment.CenterEnd else Alignment.CenterStart,
+                ),
+            )
+        }
     }
 }
 
@@ -97,7 +125,7 @@ private fun LaunchedEffectGameLoop(game: SnakeGame) {
 }
 
 @Composable
-private fun Hud(game: SnakeGame) {
+private fun Hud(game: SnakeGame, dpadOnRight: Boolean, onToggleDpadSide: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -121,6 +149,37 @@ private fun Hud(game: SnakeGame) {
             )
             Text(
                 text = stringResource(R.string.length_label, game.snake.size),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+            )
+        }
+        DpadSideToggleButton(dpadOnRight = dpadOnRight, onClick = onToggleDpadSide)
+    }
+}
+
+/** Switches which side of the screen the D-pad is anchored to; the choice
+ * is persisted so it's remembered next time the game is opened. */
+private val DpadToggleTouchTarget = 56.dp
+private val DpadToggleVisibleSize = 40.dp
+
+@Composable
+private fun DpadSideToggleButton(dpadOnRight: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(DpadToggleTouchTarget)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(DpadToggleVisibleSize)
+                .background(PixelDark, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (dpadOnRight) "◐" else "◑",
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -348,44 +407,66 @@ private fun GameOverOverlay(score: Int, onRestart: () -> Unit) {
     }
 }
 
-/** Each D-pad key sits in a square cell; the cell is the tappable area and
- * is noticeably bigger than the visible button drawn inside it, so a
- * slightly-off tap near the edge still registers. */
-private val DPadCell = 76.dp
-private val DPadButtonVisible = 64.dp
+/** Each D-pad key's tappable cell is noticeably bigger than the visible
+ * button drawn inside it, so a slightly-off tap near the edge still
+ * registers. Left/right are wider than up/down since horizontal swipes
+ * are the easiest to miss. */
+private val DPadSquareCell = 80.dp
+private val DPadWideCellWidth = 108.dp
+private val DPadVisibleInset = 12.dp
 
 @Composable
-private fun DPad(onDirection: (Direction) -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun DPad(onDirection: (Direction) -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Row {
-            Spacer(modifier = Modifier.size(DPadCell))
-            DPadButton(label = "▲", onClick = { onDirection(Direction.UP) })
-            Spacer(modifier = Modifier.size(DPadCell))
+            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
+            DPadButton(
+                label = "▲",
+                cellWidth = DPadSquareCell,
+                cellHeight = DPadSquareCell,
+                onClick = { onDirection(Direction.UP) },
+            )
+            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
         }
         Row {
-            DPadButton(label = "◀", onClick = { onDirection(Direction.LEFT) })
-            Spacer(modifier = Modifier.size(DPadCell))
-            DPadButton(label = "▶", onClick = { onDirection(Direction.RIGHT) })
+            DPadButton(
+                label = "◀",
+                cellWidth = DPadWideCellWidth,
+                cellHeight = DPadSquareCell,
+                onClick = { onDirection(Direction.LEFT) },
+            )
+            Spacer(modifier = Modifier.size(DPadSquareCell, DPadSquareCell))
+            DPadButton(
+                label = "▶",
+                cellWidth = DPadWideCellWidth,
+                cellHeight = DPadSquareCell,
+                onClick = { onDirection(Direction.RIGHT) },
+            )
         }
         Row {
-            Spacer(modifier = Modifier.size(DPadCell))
-            DPadButton(label = "▼", onClick = { onDirection(Direction.DOWN) })
-            Spacer(modifier = Modifier.size(DPadCell))
+            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
+            DPadButton(
+                label = "▼",
+                cellWidth = DPadSquareCell,
+                cellHeight = DPadSquareCell,
+                onClick = { onDirection(Direction.DOWN) },
+            )
+            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
         }
     }
 }
 
 @Composable
-private fun DPadButton(label: String, onClick: () -> Unit) {
+private fun DPadButton(label: String, cellWidth: Dp, cellHeight: Dp, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(DPadCell)
+            .size(cellWidth, cellHeight)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .size(DPadButtonVisible)
+                .size(cellWidth - DPadVisibleInset, cellHeight - DPadVisibleInset)
                 .background(PixelDark, RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
