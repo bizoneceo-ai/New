@@ -16,3 +16,4 @@ val ObstacleEdibleColor = Color(0xFFFF3B3B)
 
 val HudText = PixelLightest
 val OverlayScrim = Color(0xCC071C07)
+val ZoneFlashColor = Color(0x40FFFFFF)

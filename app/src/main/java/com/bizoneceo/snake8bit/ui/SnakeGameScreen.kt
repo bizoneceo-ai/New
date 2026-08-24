@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -49,6 +52,7 @@ import com.bizoneceo.snake8bit.ui.theme.PixelDark
 import com.bizoneceo.snake8bit.ui.theme.PixelDarkest
 import com.bizoneceo.snake8bit.ui.theme.SnakeBody
 import com.bizoneceo.snake8bit.ui.theme.SnakeHead
+import com.bizoneceo.snake8bit.ui.theme.ZoneFlashColor
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
@@ -319,31 +323,59 @@ private fun GameBoard(game: SnakeGame, controlScheme: ControlScheme, modifier: M
     }
 }
 
+/** How long a zone stays lit after a tap — a deliberate flash, not a
+ * lingering glow, so it reads as "your tap registered" rather than as
+ * decoration. */
+private const val ZoneFlashDurationMs = 120L
+
 /** Tap the left half to turn left, the right half to turn right, relative
- * to the snake's current heading — like a steering wheel. */
+ * to the snake's current heading — like a steering wheel. The whole tapped
+ * half flashes so a blind tap gets clear visual confirmation. */
 @Composable
 private fun SteeringControls(onTurnLeft: () -> Unit, onTurnRight: () -> Unit) {
     Row(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onTurnLeft),
-        )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(onClick = onTurnRight),
-        )
+        FlashZone(modifier = Modifier.weight(1f).fillMaxHeight(), onTap = onTurnLeft)
+        FlashZone(modifier = Modifier.weight(1f).fillMaxHeight(), onTap = onTurnRight)
     }
+}
+
+@Composable
+private fun FlashZone(modifier: Modifier, onTap: () -> Unit) {
+    var flashKey by remember { mutableStateOf(0) }
+    var flashing by remember { mutableStateOf(false) }
+    LaunchedEffect(flashKey) {
+        if (flashKey == 0) return@LaunchedEffect
+        flashing = true
+        delay(ZoneFlashDurationMs)
+        flashing = false
+    }
+    Box(
+        modifier = modifier
+            .background(if (flashing) ZoneFlashColor else Color.Transparent)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
+                flashKey++
+                onTap()
+            },
+    )
 }
 
 /** Splits the whole area into 4 triangular sectors by its diagonals — tap
  * the top sector for up, bottom for down, left for left, right for right.
- * Absolute directions, but the target for each one is enormous. */
+ * Absolute directions, but the target for each one is enormous. The tapped
+ * sector flashes so a blind tap gets clear visual confirmation. */
 @Composable
 private fun FourZoneControls(onDirection: (Direction) -> Unit) {
+    var flashKey by remember { mutableStateOf(0) }
+    var flashDirection by remember { mutableStateOf<Direction?>(null) }
+    LaunchedEffect(flashKey) {
+        if (flashKey == 0) return@LaunchedEffect
+        delay(ZoneFlashDurationMs)
+        flashDirection = null
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -357,10 +389,47 @@ private fun FourZoneControls(onDirection: (Direction) -> Unit) {
                         nx < 0f -> Direction.LEFT
                         else -> Direction.RIGHT
                     }
+                    flashDirection = direction
+                    flashKey++
                     onDirection(direction)
                 })
             },
-    )
+    ) {
+        val direction = flashDirection
+        if (direction != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val center = Offset(w / 2f, h / 2f)
+                val path = Path().apply {
+                    when (direction) {
+                        Direction.UP -> {
+                            moveTo(0f, 0f)
+                            lineTo(w, 0f)
+                            lineTo(center.x, center.y)
+                        }
+                        Direction.DOWN -> {
+                            moveTo(0f, h)
+                            lineTo(w, h)
+                            lineTo(center.x, center.y)
+                        }
+                        Direction.LEFT -> {
+                            moveTo(0f, 0f)
+                            lineTo(0f, h)
+                            lineTo(center.x, center.y)
+                        }
+                        Direction.RIGHT -> {
+                            moveTo(w, 0f)
+                            lineTo(w, h)
+                            lineTo(center.x, center.y)
+                        }
+                    }
+                    close()
+                }
+                drawPath(path, color = ZoneFlashColor)
+            }
+        }
+    }
 }
 
 @Composable
