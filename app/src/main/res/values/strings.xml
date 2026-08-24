@@ -6,7 +6,8 @@
     <string name="tap_to_start">НАЖМИ, ЧТОБЫ НАЧАТЬ</string>
     <string name="game_over">ИГРА ОКОНЧЕНА</string>
     <string name="tap_to_restart">НАЖМИ ДЛЯ РЕСТАРТА</string>
-    <string name="control_hint">ЛЕВАЯ ПОЛОВИНА ЭКРАНА — ПОВОРОТ ВЛЕВО\nПРАВАЯ — ВПРАВО</string>
+    <string name="control_hint_steering">ЛЕВАЯ ПОЛОВИНА ЭКРАНА — ПОВОРОТ ВЛЕВО\nПРАВАЯ — ВПРАВО</string>
+    <string name="control_hint_four_zone">ЭКРАН ПОДЕЛЁН ПО ДИАГОНАЛЯМ НА 4 ЗОНЫ:\nВВЕРХ / ВНИЗ / ВЛЕВО / ВПРАВО</string>
     <string name="paused_title">ПАУЗА</string>
     <string name="tap_to_resume">НАЖМИ, ЧТОБЫ ПРОДОЛЖИТЬ</string>
 </resources>

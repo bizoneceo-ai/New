@@ -1,8 +1,10 @@
 package com.bizoneceo.snake8bit.ui
 
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -18,11 +20,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -31,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bizoneceo.snake8bit.R
 import com.bizoneceo.snake8bit.audio.SoundEngine
+import com.bizoneceo.snake8bit.game.Direction
 import com.bizoneceo.snake8bit.game.SnakeGame
 import com.bizoneceo.snake8bit.ui.theme.AppleColor
 import com.bizoneceo.snake8bit.ui.theme.HudText
@@ -42,10 +50,29 @@ import com.bizoneceo.snake8bit.ui.theme.PixelDarkest
 import com.bizoneceo.snake8bit.ui.theme.SnakeBody
 import com.bizoneceo.snake8bit.ui.theme.SnakeHead
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+
+/** Two control schemes to compare: relative steering (tap left/right half
+ * to turn) vs an absolute 4-way screen split. Both drive the same grid
+ * game — this only changes how a tap becomes a direction. */
+private enum class ControlScheme {
+    STEERING,
+    FOUR_ZONE,
+}
+
+private const val PrefsName = "snake_prefs"
+private const val KeyControlScheme = "control_scheme"
 
 @Composable
 fun SnakeGameScreen() {
     val game = remember { SnakeGame() }
+
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PrefsName, Context.MODE_PRIVATE) }
+    var controlScheme by remember {
+        val saved = prefs.getString(KeyControlScheme, ControlScheme.STEERING.name)
+        mutableStateOf(runCatching { ControlScheme.valueOf(saved ?: "") }.getOrDefault(ControlScheme.STEERING))
+    }
 
     LaunchedEffectGameLoop(game)
 
@@ -62,9 +89,21 @@ fun SnakeGameScreen() {
             .background(PixelDarkest)
             .padding(12.dp),
     ) {
-        Hud(game)
+        Hud(
+            game = game,
+            controlScheme = controlScheme,
+            onToggleControlScheme = {
+                controlScheme = if (controlScheme == ControlScheme.STEERING) {
+                    ControlScheme.FOUR_ZONE
+                } else {
+                    ControlScheme.STEERING
+                }
+                prefs.edit().putString(KeyControlScheme, controlScheme.name).apply()
+                SoundEngine.playPauseToggle()
+            },
+        )
         Spacer(modifier = Modifier.size(8.dp))
-        GameBoard(game, modifier = Modifier.weight(1f).fillMaxWidth())
+        GameBoard(game, controlScheme, modifier = Modifier.weight(1f).fillMaxWidth())
     }
 }
 
@@ -92,7 +131,7 @@ private fun LaunchedEffectGameLoop(game: SnakeGame) {
 }
 
 @Composable
-private fun Hud(game: SnakeGame) {
+private fun Hud(game: SnakeGame, controlScheme: ControlScheme, onToggleControlScheme: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -116,6 +155,37 @@ private fun Hud(game: SnakeGame) {
             )
             Text(
                 text = stringResource(R.string.length_label, game.snake.size),
+                color = HudText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+            )
+        }
+        ControlSchemeToggleButton(controlScheme = controlScheme, onClick = onToggleControlScheme)
+    }
+}
+
+/** Lets you switch between the two control schemes to compare them,
+ * without reinstalling anything; the choice is remembered. */
+private val ControlToggleTouchTarget = 56.dp
+private val ControlToggleVisibleSize = 40.dp
+
+@Composable
+private fun ControlSchemeToggleButton(controlScheme: ControlScheme, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(ControlToggleTouchTarget)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(ControlToggleVisibleSize)
+                .background(PixelDark, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (controlScheme == ControlScheme.STEERING) "↺" else "✛",
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -156,7 +226,7 @@ private fun PauseButton(paused: Boolean, enabled: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
+private fun GameBoard(game: SnakeGame, controlScheme: ControlScheme, modifier: Modifier = Modifier) {
     BoxWithConstraints(
         modifier = modifier.background(PixelDark),
         contentAlignment = Alignment.Center,
@@ -203,23 +273,23 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
             )
         }
 
-        // Two giant tap zones covering the whole board area — left half
-        // turns left, right half turns right, relative to the snake's
-        // current heading. Meant to be playable without looking: any tap
-        // on "your" side works, there's nothing small to aim for.
+        // The whole board area doubles as the controls — huge targets so
+        // it's playable without looking down at your thumbs.
         if (game.started && !game.gameOver && !game.paused) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                TurnZone(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    onTap = {
+            when (controlScheme) {
+                ControlScheme.STEERING -> SteeringControls(
+                    onTurnLeft = {
                         game.turnLeft()
                         SoundEngine.playTurn()
                     },
-                )
-                TurnZone(
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                    onTap = {
+                    onTurnRight = {
                         game.turnRight()
+                        SoundEngine.playTurn()
+                    },
+                )
+                ControlScheme.FOUR_ZONE -> FourZoneControls(
+                    onDirection = {
+                        game.queueDirection(it)
                         SoundEngine.playTurn()
                     },
                 )
@@ -227,7 +297,7 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
         }
 
         if (!game.started && !game.gameOver) {
-            StartOverlay(onStart = game::start)
+            StartOverlay(controlScheme = controlScheme, onStart = game::start)
         }
         if (game.started && !game.gameOver && game.paused) {
             PausedOverlay(
@@ -249,13 +319,52 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
     }
 }
 
+/** Tap the left half to turn left, the right half to turn right, relative
+ * to the snake's current heading — like a steering wheel. */
 @Composable
-private fun TurnZone(modifier: Modifier, onTap: () -> Unit) {
-    Box(modifier = modifier.clickable(onClick = onTap))
+private fun SteeringControls(onTurnLeft: () -> Unit, onTurnRight: () -> Unit) {
+    Row(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onTurnLeft),
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(onClick = onTurnRight),
+        )
+    }
+}
+
+/** Splits the whole area into 4 triangular sectors by its diagonals — tap
+ * the top sector for up, bottom for down, left for left, right for right.
+ * Absolute directions, but the target for each one is enormous. */
+@Composable
+private fun FourZoneControls(onDirection: (Direction) -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { offset ->
+                    val nx = offset.x / size.width - 0.5f
+                    val ny = offset.y / size.height - 0.5f
+                    val direction = when {
+                        ny <= -abs(nx) -> Direction.UP
+                        ny >= abs(nx) -> Direction.DOWN
+                        nx < 0f -> Direction.LEFT
+                        else -> Direction.RIGHT
+                    }
+                    onDirection(direction)
+                })
+            },
+    )
 }
 
 @Composable
-private fun StartOverlay(onStart: () -> Unit) {
+private fun StartOverlay(controlScheme: ControlScheme, onStart: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -282,7 +391,13 @@ private fun StartOverlay(onStart: () -> Unit) {
             )
             Spacer(modifier = Modifier.size(8.dp))
             Text(
-                text = stringResource(R.string.control_hint),
+                text = stringResource(
+                    if (controlScheme == ControlScheme.STEERING) {
+                        R.string.control_hint_steering
+                    } else {
+                        R.string.control_hint_four_zone
+                    },
+                ),
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,

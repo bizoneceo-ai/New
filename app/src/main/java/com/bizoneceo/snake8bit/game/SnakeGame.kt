@@ -129,7 +129,8 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
         spawnApple()
     }
 
-    private fun queueDirection(newDirection: Direction) {
+    /** Absolute direction pick — e.g. from a 4-zone screen split. */
+    fun queueDirection(newDirection: Direction) {
         if (gameOver || newDirection.isOppositeOf(direction)) return
         pendingDirection = newDirection
     }
