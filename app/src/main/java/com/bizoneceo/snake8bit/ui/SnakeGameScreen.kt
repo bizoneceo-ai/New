@@ -1,16 +1,15 @@
 package com.bizoneceo.snake8bit.ui
 
-import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,26 +18,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bizoneceo.snake8bit.R
 import com.bizoneceo.snake8bit.audio.SoundEngine
-import com.bizoneceo.snake8bit.game.Direction
 import com.bizoneceo.snake8bit.game.SnakeGame
 import com.bizoneceo.snake8bit.ui.theme.AppleColor
 import com.bizoneceo.snake8bit.ui.theme.HudText
@@ -50,18 +42,10 @@ import com.bizoneceo.snake8bit.ui.theme.PixelDarkest
 import com.bizoneceo.snake8bit.ui.theme.SnakeBody
 import com.bizoneceo.snake8bit.ui.theme.SnakeHead
 import kotlinx.coroutines.delay
-import kotlin.math.abs
-
-private const val PrefsName = "snake_prefs"
-private const val KeyDpadOnRight = "dpad_on_right"
 
 @Composable
 fun SnakeGameScreen() {
     val game = remember { SnakeGame() }
-
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences(PrefsName, Context.MODE_PRIVATE) }
-    var dpadOnRight by remember { mutableStateOf(prefs.getBoolean(KeyDpadOnRight, true)) }
 
     LaunchedEffectGameLoop(game)
 
@@ -78,26 +62,9 @@ fun SnakeGameScreen() {
             .background(PixelDarkest)
             .padding(12.dp),
     ) {
-        Hud(
-            game = game,
-            dpadOnRight = dpadOnRight,
-            onToggleDpadSide = {
-                dpadOnRight = !dpadOnRight
-                prefs.edit().putBoolean(KeyDpadOnRight, dpadOnRight).apply()
-                SoundEngine.playPauseToggle()
-            },
-        )
+        Hud(game)
         Spacer(modifier = Modifier.size(8.dp))
         GameBoard(game, modifier = Modifier.weight(1f).fillMaxWidth())
-        Spacer(modifier = Modifier.size(12.dp))
-        Box(modifier = Modifier.fillMaxWidth()) {
-            DPad(
-                onDirection = game::queueDirection,
-                modifier = Modifier.align(
-                    if (dpadOnRight) Alignment.CenterEnd else Alignment.CenterStart,
-                ),
-            )
-        }
     }
 }
 
@@ -125,7 +92,7 @@ private fun LaunchedEffectGameLoop(game: SnakeGame) {
 }
 
 @Composable
-private fun Hud(game: SnakeGame, dpadOnRight: Boolean, onToggleDpadSide: () -> Unit) {
+private fun Hud(game: SnakeGame) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -149,37 +116,6 @@ private fun Hud(game: SnakeGame, dpadOnRight: Boolean, onToggleDpadSide: () -> U
             )
             Text(
                 text = stringResource(R.string.length_label, game.snake.size),
-                color = HudText,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-            )
-        }
-        DpadSideToggleButton(dpadOnRight = dpadOnRight, onClick = onToggleDpadSide)
-    }
-}
-
-/** Switches which side of the screen the D-pad is anchored to; the choice
- * is persisted so it's remembered next time the game is opened. */
-private val DpadToggleTouchTarget = 56.dp
-private val DpadToggleVisibleSize = 40.dp
-
-@Composable
-private fun DpadSideToggleButton(dpadOnRight: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(DpadToggleTouchTarget)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(DpadToggleVisibleSize)
-                .background(PixelDark, RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (dpadOnRight) "◐" else "◑",
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
@@ -234,18 +170,7 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
         Canvas(
             modifier = Modifier
                 .size(boardWidth, boardHeight)
-                .background(PixelDarkest)
-                .pointerInput(Unit) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val direction = if (abs(dragAmount.x) > abs(dragAmount.y)) {
-                            if (dragAmount.x > 0) Direction.RIGHT else Direction.LEFT
-                        } else {
-                            if (dragAmount.y > 0) Direction.DOWN else Direction.UP
-                        }
-                        game.queueDirection(direction)
-                    }
-                },
+                .background(PixelDarkest),
         ) {
             val cellPx = size.width / game.cols
             val gap = cellPx * 0.15f
@@ -278,6 +203,29 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
             )
         }
 
+        // Two giant tap zones covering the whole board area — left half
+        // turns left, right half turns right, relative to the snake's
+        // current heading. Meant to be playable without looking: any tap
+        // on "your" side works, there's nothing small to aim for.
+        if (game.started && !game.gameOver && !game.paused) {
+            Row(modifier = Modifier.fillMaxSize()) {
+                TurnZone(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    onTap = {
+                        game.turnLeft()
+                        SoundEngine.playTurn()
+                    },
+                )
+                TurnZone(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    onTap = {
+                        game.turnRight()
+                        SoundEngine.playTurn()
+                    },
+                )
+            }
+        }
+
         if (!game.started && !game.gameOver) {
             StartOverlay(onStart = game::start)
         }
@@ -299,6 +247,11 @@ private fun GameBoard(game: SnakeGame, modifier: Modifier = Modifier) {
             )
         }
     }
+}
+
+@Composable
+private fun TurnZone(modifier: Modifier, onTap: () -> Unit) {
+    Box(modifier = modifier.clickable(onClick = onTap))
 }
 
 @Composable
@@ -329,7 +282,7 @@ private fun StartOverlay(onStart: () -> Unit) {
             )
             Spacer(modifier = Modifier.size(8.dp))
             Text(
-                text = stringResource(R.string.swipe_hint),
+                text = stringResource(R.string.control_hint),
                 color = HudText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
@@ -402,80 +355,6 @@ private fun GameOverOverlay(score: Int, onRestart: () -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-/** Each D-pad key's tappable cell is noticeably bigger than the visible
- * button drawn inside it, so a slightly-off tap near the edge still
- * registers. Left/right are wider than up/down since horizontal swipes
- * are the easiest to miss. */
-private val DPadSquareCell = 80.dp
-private val DPadWideCellWidth = 108.dp
-private val DPadVisibleInset = 12.dp
-
-@Composable
-private fun DPad(onDirection: (Direction) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Row {
-            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
-            DPadButton(
-                label = "▲",
-                cellWidth = DPadSquareCell,
-                cellHeight = DPadSquareCell,
-                onClick = { onDirection(Direction.UP) },
-            )
-            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
-        }
-        Row {
-            DPadButton(
-                label = "◀",
-                cellWidth = DPadWideCellWidth,
-                cellHeight = DPadSquareCell,
-                onClick = { onDirection(Direction.LEFT) },
-            )
-            Spacer(modifier = Modifier.size(DPadSquareCell, DPadSquareCell))
-            DPadButton(
-                label = "▶",
-                cellWidth = DPadWideCellWidth,
-                cellHeight = DPadSquareCell,
-                onClick = { onDirection(Direction.RIGHT) },
-            )
-        }
-        Row {
-            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
-            DPadButton(
-                label = "▼",
-                cellWidth = DPadSquareCell,
-                cellHeight = DPadSquareCell,
-                onClick = { onDirection(Direction.DOWN) },
-            )
-            Spacer(modifier = Modifier.size(DPadWideCellWidth, DPadSquareCell))
-        }
-    }
-}
-
-@Composable
-private fun DPadButton(label: String, cellWidth: Dp, cellHeight: Dp, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(cellWidth, cellHeight)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(cellWidth - DPadVisibleInset, cellHeight - DPadVisibleInset)
-                .background(PixelDark, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = label,
-                color = HudText,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 26.sp,
             )
         }
     }

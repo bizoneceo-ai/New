@@ -16,6 +16,10 @@ object SoundEngine {
     fun playGameOver() = playSequence(440f to 110, 330f to 110, 220f to 160)
     fun playPauseToggle() = playSequence(520f to 45)
 
+    /** Very short, quiet tick — this fires on every turn, so it needs to
+     * stay unobtrusive rather than compete with the other cues. */
+    fun playTurn() = playSequence(300f to 20)
+
     private fun playSequence(vararg notes: Pair<Float, Int>) {
         thread(isDaemon = true) {
             notes.forEach { (freqHz, durationMs) -> playTone(freqHz, durationMs) }

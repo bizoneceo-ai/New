@@ -16,6 +16,16 @@ enum class Direction(val dx: Int, val dy: Int) {
 
     fun isOppositeOf(other: Direction): Boolean =
         dx == -other.dx && dy == -other.dy
+
+    /** 90° turn relative to this direction, steering-wheel style. */
+    fun turnedLeft(): Direction = fromDelta(dy, -dx)
+
+    fun turnedRight(): Direction = fromDelta(-dy, dx)
+
+    companion object {
+        private fun fromDelta(dx: Int, dy: Int): Direction =
+            entries.first { it.dx == dx && it.dy == dy }
+    }
 }
 
 data class Point(val x: Int, val y: Int) {
@@ -119,10 +129,17 @@ class SnakeGame(val cols: Int = 20, val rows: Int = 30) {
         spawnApple()
     }
 
-    fun queueDirection(newDirection: Direction) {
+    private fun queueDirection(newDirection: Direction) {
         if (gameOver || newDirection.isOppositeOf(direction)) return
         pendingDirection = newDirection
     }
+
+    /** Steering-wheel style controls: turn relative to the current heading
+     * rather than pick an absolute direction. Much easier to hit blind
+     * than a 4-way pad. */
+    fun turnLeft() = queueDirection(direction.turnedLeft())
+
+    fun turnRight() = queueDirection(direction.turnedRight())
 
     fun tick() {
         if (gameOver || !started || paused) return
