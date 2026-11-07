@@ -48,6 +48,7 @@ class AndroidFeedback(context: Context) : Feedback {
     @Volatile private var checkerSound = 0
     @Volatile private var winSound = 0
     private var lastDice = 0L
+    private var lastKnock = 0L
 
     init {
         val dir = File(context.cacheDir, "sfx").apply { mkdirs() }
@@ -80,6 +81,18 @@ class AndroidFeedback(context: Context) : Feedback {
         val s = settings()
         if (s.sound && checkerSound != 0) pool.play(checkerSound, 0.8f, 0.8f, 1, 0, 0.95f + Random.nextFloat() * 0.1f)
         if (s.vibration) vibrate(14, 110)
+    }
+
+    override fun knock(strength: Float) {
+        val now = System.currentTimeMillis()
+        if (now - lastKnock < 40) return
+        lastKnock = now
+        val s = settings()
+        if (s.sound && checkerSound != 0) {
+            val v = 0.15f + 0.7f * strength
+            pool.play(checkerSound, v, v, 0, 0, 1.15f + Random.nextFloat() * 0.25f)
+        }
+        if (s.vibration && strength > 0.15f) vibrate(5 + (strength * 12).toLong(), (30 + strength * 150).toInt())
     }
 
     override fun tap() {

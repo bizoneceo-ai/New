@@ -12,8 +12,26 @@ android {
         applicationId = "com.bizoneceo.nardy"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
+        buildConfigField("boolean", "PHYSICS_3D", "false")
+    }
+
+    // Two apps from one code base, installable side by side:
+    //  classic — the main game;
+    //  physics — test build with 3D checkers, real-time physics and tilt.
+    flavorDimensions += "edition"
+    productFlavors {
+        create("classic") {
+            dimension = "edition"
+        }
+        create("physics") {
+            dimension = "edition"
+            applicationIdSuffix = ".physics3d"
+            versionNameSuffix = "-3d"
+            resValue("string", "app_name", "Нарды 3D (тест)")
+            buildConfigField("boolean", "PHYSICS_3D", "true")
+        }
     }
 
     // Fixed debug key (checked in) so every CI build installs as an update.
@@ -44,6 +62,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

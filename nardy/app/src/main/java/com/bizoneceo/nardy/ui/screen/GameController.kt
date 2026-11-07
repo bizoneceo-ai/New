@@ -6,7 +6,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import com.bizoneceo.nardy.engine.Ai
+import com.bizoneceo.nardy.engine.AiLevel
 import com.bizoneceo.nardy.engine.GameState
+import com.bizoneceo.nardy.engine.Move
 import com.bizoneceo.nardy.engine.Phase
 import com.bizoneceo.nardy.engine.Player
 import com.bizoneceo.nardy.engine.Position
@@ -16,7 +19,10 @@ import com.bizoneceo.nardy.ui.board.Spot
 import com.bizoneceo.nardy.ui.board.relOf
 import com.bizoneceo.nardy.ui.board.spotOf
 import com.bizoneceo.nardy.ui.dice.DiceListener
+import com.bizoneceo.nardy.ui.physics.CheckerWorld
+import com.bizoneceo.nardy.ui.physics.TiltSource
 import com.bizoneceo.nardy.ui.dice.DiceTray
+import kotlin.concurrent.thread
 import kotlin.math.hypot
 import kotlin.random.Random
 
@@ -26,6 +32,8 @@ interface Feedback {
     fun checker() {}
     fun tap() {}
     fun victory() {}
+    /** Two checkers (or a checker and a rail) knocking together, 0..1. */
+    fun knock(strength: Float) {}
 }
 
 data class Settings(
@@ -35,6 +43,8 @@ data class Settings(
     val sound: Boolean = true,
     val vibration: Boolean = true,
     val matchLength: Int = 0,
+    /** Opponent for new games: null = a friend on the same device, else the computer. */
+    val opponent: AiLevel? = null,
 )
 
 /** A checker gliding across the board, in board units. */
@@ -106,6 +116,35 @@ class GameController(
 
     var layout: GameLayout? = null
 
+    /** Physics for the 3D build: null in the classic build. */
+    var world: CheckerWorld? = null
+        private set
+    private var tilt: TiltSource? = null
+
+    /** How the top of a checker shifts per unit of height on screen (3D build). */
+    var camera = Offset(0f, -0.45f)
+        private set
+
+    /** Turns on 3D checkers driven by [tiltSource] (accelerometer). */
+    fun enablePhysics(tiltSource: TiltSource) {
+        tilt = tiltSource
+        world = CheckerWorld().also { w -> w.onImpact = { feedback.knock(it) } }
+    }
+
+    /** The side played by the computer, or null for two people. */
+    var aiPlayer by mutableStateOf<Player?>(null)
+        private set
+    var aiLevel by mutableStateOf(AiLevel.AMATEUR)
+        private set
+    /** True while the computer is working out its move. */
+    var aiThinking by mutableStateOf(false)
+        private set
+
+    private var aiWaitUntil = 0L
+    private var aiQueue: ArrayDeque<Move>? = null
+    private var aiGeneration = 0
+    @Volatile private var aiResult: Pair<GameState, List<Move>>? = null
+
     private var lastFrame = 0L
     private var gesture: Gesture = Gesture.None
 
@@ -129,12 +168,18 @@ class GameController(
 
     // ---------------------------------------------------------------- derived
 
+    /** It is the computer's turn (to throw or to move). */
+    val isAiTurn: Boolean
+        get() = aiPlayer != null && state.current == aiPlayer &&
+            (state.phase == Phase.AWAIT_ROLL || state.phase == Phase.MOVING)
+
+    /** The dice may be thrown by a person now (the opening roll-off is always thrown by a person). */
     val canThrow: Boolean
         get() = (state.phase == Phase.OPENING_ROLL || state.phase == Phase.AWAIT_ROLL) &&
-            !tray.isRolling && flyers.isEmpty()
+            !tray.isRolling && flyers.isEmpty() && !isAiTurn
 
     val canInteract: Boolean
-        get() = state.phase == Phase.MOVING && diceSettled && flyers.isEmpty()
+        get() = state.phase == Phase.MOVING && diceSettled && flyers.isEmpty() && !isAiTurn
 
     val selectedRoutes: List<Route>
         get() = selected?.let { s -> if (canInteract) state.routesFrom(s) else emptyList() } ?: emptyList()
@@ -156,7 +201,8 @@ class GameController(
     }
 
     val needsFrames: Boolean
-        get() = tray.isBusy || flyers.isNotEmpty() || drag != null || selected != null || canThrow
+        get() = tray.isBusy || flyers.isNotEmpty() || drag != null || selected != null || canThrow || isAiTurn ||
+            world != null
 
     // ---------------------------------------------------------------- frames
 
@@ -175,11 +221,110 @@ class GameController(
         if (flyers.isNotEmpty()) {
             val done = flyers.filter { it.isDone(nanos) }
             if (done.isNotEmpty()) {
+                world?.let { w ->
+                    for (f in done) {
+                        // Carry the checker's momentum into the stack it lands on.
+                        val a = f.path[maxOf(0, f.path.size - 2)]
+                        val b = f.path.last()
+                        val dir = (b - a).let { if (it.getDistance() < 1e-3f) Offset.Zero else it / it.getDistance() }
+                        w.landed(f.target, dir * 2.5f)
+                    }
+                }
                 flyers.removeAll(done)
                 feedback.checker()
             }
         }
+        if (isAiTurn) aiTick(nanos)
+        world?.let { stepPhysics(it, dt) }
         frameNanos = nanos
+    }
+
+    private fun stepPhysics(w: CheckerWorld, dt: Float) {
+        val l = layout ?: return
+        val src = tilt
+        val screen = if (src != null) Offset(src.x, src.y) else Offset.Zero
+        // Screen axes → board axes (the board may be drawn turned by 90°).
+        val board = if (l.transform.rotated) Offset(screen.y, -screen.x) else screen
+        w.gravity = board
+        camera = Offset(0f, -0.45f) - board * 0.6f
+        val pos = state.position
+        w.sync(pos, l.geometry, { visibleCount(pos, it) }, { countAt(pos, it) })
+        w.step(dt, l.geometry.checker / 2, drag?.board)
+    }
+
+    // ---------------------------------------------------------------- computer
+
+    /** Drives the computer's turn a little further; called every frame while it is its turn. */
+    private fun aiTick(now: Long) {
+        if (now < aiWaitUntil) return
+        when (state.phase) {
+            Phase.AWAIT_ROLL -> if (!tray.isRolling && flyers.isEmpty()) {
+                aiThrow()
+                aiWaitUntil = now + 400_000_000L
+            }
+            Phase.MOVING -> {
+                if (!diceSettled || flyers.isNotEmpty() || tray.isRolling) return
+                val queue = aiQueue
+                if (queue == null) {
+                    val result = aiResult
+                    if (result != null && result.first === state) {
+                        aiResult = null
+                        aiThinking = false
+                        aiQueue = ArrayDeque(result.second)
+                        aiWaitUntil = now + 350_000_000L
+                    } else if (!aiThinking) {
+                        startThinking()
+                    }
+                    return
+                }
+                val next = queue.removeFirstOrNull()
+                when {
+                    next != null && next in state.legalSteps -> {
+                        play(Route(listOf(next)))
+                        aiWaitUntil = now + 420_000_000L
+                    }
+                    next != null -> aiQueue = null // position changed under us: think again
+                    !state.canMove -> {
+                        aiQueue = null
+                        endTurn()
+                        aiWaitUntil = now + 300_000_000L
+                    }
+                    else -> aiQueue = null
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    private fun startThinking() {
+        val snapshot = state
+        val level = aiLevel
+        val generation = aiGeneration
+        aiThinking = true
+        thread(isDaemon = true, name = "nardy-ai") {
+            val moves = runCatching { Ai.chooseTurn(snapshot, level, random) }.getOrDefault(emptyList())
+            if (generation == aiGeneration) aiResult = snapshot to moves
+        }
+    }
+
+    private fun aiThrow() {
+        val l = layout ?: return
+        // A flick from the computer's side towards the middle of the arena.
+        val from = l.docks.getValue(state.current).let { (it[0] + it[1]) / 2f }
+        val dir = (l.diceArena.center - from).let { if (it.getDistance() < 1f) Offset(1f, 0f) else it / it.getDistance() }
+        val angle = (random.nextFloat() - 0.5f) * 1.2f
+        val c = kotlin.math.cos(angle)
+        val sn = kotlin.math.sin(angle)
+        val v = Offset(dir.x * c - dir.y * sn, dir.x * sn + dir.y * c) * (l.dieSize * (18f + random.nextFloat() * 14f))
+        throwDice(v)
+    }
+
+    private fun resetAi() {
+        aiGeneration++
+        aiQueue = null
+        aiResult = null
+        aiThinking = false
+        aiWaitUntil = 0L
     }
 
     fun onIdle() {
@@ -337,7 +482,7 @@ class GameController(
     }
 
     fun undo() {
-        if (!state.canUndo || flyers.isNotEmpty()) return
+        if (!state.canUndo || flyers.isNotEmpty() || isAiTurn) return
         selected = null
         update(state.undo())
         feedback.tap()
@@ -352,17 +497,28 @@ class GameController(
 
     fun nextGame() {
         if (state.phase != Phase.GAME_OVER) return
+        resetAi()
+        world?.clear()
         openingThrow = true
         update(state.nextGame())
     }
 
-    fun newMatch(variant: Variant, matchLength: Int) {
+    fun newMatch(variant: Variant, matchLength: Int, opponent: AiLevel? = aiPlayer?.let { aiLevel }) {
+        setOpponent(opponent)
+        world?.clear()
         flyers.clear()
         selected = null
         drag = null
         openingThrow = true
         diceSettled = true
         update(GameState.newMatch(variant, matchLength))
+    }
+
+    /** The computer always takes black; the person plays white from the near side. */
+    fun setOpponent(level: AiLevel?) {
+        resetAi()
+        aiPlayer = if (level != null) Player.BLACK else null
+        if (level != null) aiLevel = level
     }
 
     private fun update(s: GameState) {

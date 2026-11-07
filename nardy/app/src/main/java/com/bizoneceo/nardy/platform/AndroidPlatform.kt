@@ -6,6 +6,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.lifecycle.AndroidViewModel
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowLayoutInfo
+import com.bizoneceo.nardy.BuildConfig
+import com.bizoneceo.nardy.engine.AiLevel
+import com.bizoneceo.nardy.ui.physics.TiltSource
 import com.bizoneceo.nardy.ui.screen.AppModel
 import com.bizoneceo.nardy.ui.screen.FoldInfo
 import com.bizoneceo.nardy.ui.screen.Settings
@@ -20,8 +23,12 @@ class NardyViewModel(app: Application) : AndroidViewModel(app) {
     // Dice must be fair: a cryptographic RNG, never a seeded one.
     val model = AppModel(PrefsStorage(app), SecureRandom().asKotlinRandom(), feedback)
 
+    /** Device tilt for the 3D test build; null in the classic build. */
+    val tilt: TiltSource? = if (BuildConfig.PHYSICS_3D) TiltSource() else null
+
     init {
         feedback.settings = { model.settings }
+        tilt?.let { model.controller.enablePhysics(it) }
     }
 
     override fun onCleared() {
@@ -53,6 +60,7 @@ class PrefsStorage(context: Context) : Storage {
             sound = prefs.getBoolean("sound", d.sound),
             vibration = prefs.getBoolean("vibration", d.vibration),
             matchLength = prefs.getInt("matchLength", d.matchLength),
+            opponent = AiLevel.entries.firstOrNull { it.name == prefs.getString("opponent", null) },
         )
     }
 
@@ -63,6 +71,7 @@ class PrefsStorage(context: Context) : Storage {
             .putBoolean("sound", settings.sound)
             .putBoolean("vibration", settings.vibration)
             .putInt("matchLength", settings.matchLength)
+            .putString("opponent", settings.opponent?.name)
             .apply()
     }
 

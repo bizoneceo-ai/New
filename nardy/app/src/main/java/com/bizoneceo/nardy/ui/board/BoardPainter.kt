@@ -207,9 +207,16 @@ fun DrawScope.drawBoard(g: BoardGeometry, t: BoardTheme) {
 }
 
 /** A turned-wood / bone checker seen from above. */
-fun DrawScope.drawChecker(center: Offset, radius: Float, c: CheckerColors, alpha: Float = 1f, lifted: Float = 0f) {
+fun DrawScope.drawChecker(
+    center: Offset,
+    radius: Float,
+    c: CheckerColors,
+    alpha: Float = 1f,
+    lifted: Float = 0f,
+    shadow: Boolean = true,
+) {
     val sh = Offset(0.05f + lifted * 0.25f, 0.08f + lifted * 0.35f)
-    drawCircle(
+    if (shadow) drawCircle(
         Brush.radialGradient(
             0f to Color.Black.copy(alpha = 0.5f * alpha), 0.75f to Color.Black.copy(alpha = 0.25f * alpha),
             1f to Color.Transparent, center = center + sh, radius = radius * (1.12f + lifted * 0.2f),
@@ -247,4 +254,63 @@ fun DrawScope.drawOffSlab(r: Rect, c: CheckerColors) {
         r.topLeft, r.size, CornerRadius(r.height / 2),
     )
     drawRoundRect(c.rim, r.topLeft, r.size, CornerRadius(r.height / 2), style = Stroke(0.015f))
+}
+
+/**
+ * A checker as a real cylinder: [cam] is how far the top face slides per
+ * unit of height as seen by the viewer (it follows the device tilt), so the
+ * turned side of the checker shows and the stack reads as solid 3D pieces.
+ */
+fun DrawScope.drawChecker3D(
+    center: Offset,
+    radius: Float,
+    c: CheckerColors,
+    cam: Offset,
+    alpha: Float = 1f,
+    lifted: Float = 0f,
+) {
+    val thickness = 0.24f
+    val base = center + cam * (lifted * 0.9f)
+    val top = base + cam * thickness
+
+    // Contact shadow, spreading and fading as the checker is lifted.
+    val sh = center + Offset(0.06f + lifted * 0.3f, 0.09f + lifted * 0.4f)
+    val shR = radius * (1.1f + lifted * 0.25f)
+    drawCircle(
+        Brush.radialGradient(
+            0f to Color.Black.copy(alpha = 0.55f * alpha / (1 + lifted)),
+            0.7f to Color.Black.copy(alpha = 0.25f * alpha / (1 + lifted)),
+            1f to Color.Transparent, center = sh, radius = shR,
+        ),
+        radius = shR, center = sh,
+    )
+
+    // Turned side: bottom disc plus the band joining it to the top face.
+    val axis = top - base
+    val len = axis.getDistance()
+    val n = if (len < 1e-4f) Offset(1f, 0f) else Offset(-axis.y / len, axis.x / len)
+    drawCircle(c.dark, radius, base, alpha = alpha)
+    if (len > 1e-4f) {
+        val band = Path().apply {
+            moveTo(base.x + n.x * radius, base.y + n.y * radius)
+            lineTo(top.x + n.x * radius, top.y + n.y * radius)
+            lineTo(top.x - n.x * radius, top.y - n.y * radius)
+            lineTo(base.x - n.x * radius, base.y - n.y * radius)
+            close()
+        }
+        drawPath(
+            band,
+            Brush.linearGradient(
+                listOf(c.dark, c.base, c.light, c.base, c.dark),
+                start = base + n * radius, end = base - n * radius,
+            ),
+            alpha = alpha,
+        )
+        // Lathe grooves around the edge.
+        for (k in 1..2) {
+            val mid = base + axis * (k / 3f)
+            drawCircle(Color.Black.copy(alpha = 0.18f * alpha), radius, mid, style = Stroke(0.012f))
+        }
+    }
+    drawChecker(top, radius, c, alpha = alpha, shadow = false)
 }

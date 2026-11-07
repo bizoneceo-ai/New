@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bizoneceo.nardy.engine.AiLevel
 import com.bizoneceo.nardy.engine.GameState
 import com.bizoneceo.nardy.engine.Phase
 import com.bizoneceo.nardy.engine.Variant
@@ -63,9 +65,13 @@ private val TextDim = Color(0xFFA89C88)
 fun MenuScreen(
     settings: Settings,
     saved: GameState?,
+    /** Who the saved game is against, e.g. "против ИИ · Мастер". */
+    savedOpponent: String,
     onSettings: (Settings) -> Unit,
     onContinue: () -> Unit,
     onNewGame: (Variant) -> Unit,
+    /** The 3D-physics test build. */
+    physics3d: Boolean = false,
 ) {
     val theme = themeById(settings.themeId)
     var showRules by remember { mutableStateOf(false) }
@@ -88,17 +94,24 @@ fun MenuScreen(
                 color = theme.accent, fontSize = 52.sp, fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.Bold, letterSpacing = 10.sp,
             )
-            Text("игра вдвоём на одном устройстве", color = TextDim, fontSize = 15.sp)
+            Text("вдвоём на одном устройстве или против компьютера", color = TextDim, fontSize = 15.sp)
+            if (physics3d) {
+                Text(
+                    "Тестовая сборка: объёмные фишки с физикой — наклоните или встряхните телефон",
+                    color = theme.accent, fontSize = 14.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
             Spacer(Modifier.height(18.dp))
 
             if (wide) {
                 Row(Modifier.widthIn(max = 1100.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    Column(Modifier.weight(1f)) { PlayColumn(theme, saved, onContinue, onNewGame) }
+                    Column(Modifier.weight(1f)) { PlayColumn(settings, onSettings, saved, savedOpponent, onContinue, onNewGame) }
                     Column(Modifier.weight(1f)) { SettingsColumn(settings, onSettings) { showRules = true } }
                 }
             } else {
                 Column(Modifier.widthIn(max = 560.dp)) {
-                    PlayColumn(theme, saved, onContinue, onNewGame)
+                    PlayColumn(settings, onSettings, saved, savedOpponent, onContinue, onNewGame)
                     Spacer(Modifier.height(18.dp))
                     SettingsColumn(settings, onSettings) { showRules = true }
                 }
@@ -109,19 +122,38 @@ fun MenuScreen(
 }
 
 @Composable
-private fun PlayColumn(theme: BoardTheme, saved: GameState?, onContinue: () -> Unit, onNewGame: (Variant) -> Unit) {
+private fun PlayColumn(
+    settings: Settings,
+    onSettings: (Settings) -> Unit,
+    saved: GameState?,
+    savedOpponent: String,
+    onContinue: () -> Unit,
+    onNewGame: (Variant) -> Unit,
+) {
+    val theme = themeById(settings.themeId)
     BoardPreview(theme, Modifier.fillMaxWidth().aspectRatio(1.45f))
     Spacer(Modifier.height(16.dp))
     val resumable = saved != null && saved.phase != Phase.MATCH_OVER
     if (resumable && saved != null) {
         BigButton(
             "Продолжить партию",
-            "${variantName(saved.variant)} · счёт ${saved.score(com.bizoneceo.nardy.engine.Player.WHITE)}:" +
+            "${variantName(saved.variant)} · $savedOpponent · счёт ${saved.score(com.bizoneceo.nardy.engine.Player.WHITE)}:" +
                 "${saved.score(com.bizoneceo.nardy.engine.Player.BLACK)}",
             theme, primary = true, onClick = onContinue,
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(16.dp))
     }
+    SectionTitle("Соперник: друг или компьютер", theme)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Chip("Друг", settings.opponent == null, theme) { onSettings(settings.copy(opponent = null)) }
+        for (level in AiLevel.entries) {
+            Chip(level.title, settings.opponent == level, theme) { onSettings(settings.copy(opponent = level)) }
+        }
+    }
+    Text(
+        if (settings.opponent == null) "Вдвоём на одном устройстве" else "Вы играете белыми, компьютер — чёрными",
+        color = TextDim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+    )
     BigButton("Длинные нарды", "без боя, все с «головы», в одну сторону", theme, primary = !resumable) {
         onNewGame(Variant.LONG)
     }

@@ -52,14 +52,21 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk nardy-debug.apk
+      - name: Rename APKs
+        run: |
+          if [ -f app/build/outputs/apk/classic/debug/app-classic-debug.apk ]; then
+            cp app/build/outputs/apk/classic/debug/app-classic-debug.apk nardy-debug.apk
+            cp app/build/outputs/apk/physics/debug/app-physics-debug.apk nardy-3d-debug.apk
+          else
+            # Versions before the 3D test build had a single flavour.
+            cp app/build/outputs/apk/debug/app-debug.apk nardy-debug.apk
+          fi
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: nardy-apk
-          path: nardy/nardy-debug.apk
+          path: nardy/nardy-*debug.apk
 
       - name: Resolve commit
         id: commit
@@ -86,8 +93,13 @@ jobs:
           tag_name: nardy-apk-latest
           name: "Нарды (сборка ${{ github.run_number }})"
           body: |
-            Автоматическая сборка debug-APK из ветки `${{ github.ref_name }}`.
-            Скачайте `nardy-debug.apk` ниже и установите на телефоне
-            (разрешите установку из неизвестных источников при первом запросе).
-          files: nardy/nardy-debug.apk
+            Автоматическая сборка из ветки `${{ github.ref_name }}`.
+
+            * `nardy-debug.apk` — основная версия (игра вдвоём и против ИИ);
+            * `nardy-3d-debug.apk` — тестовая сборка «Нарды 3D»: объёмные фишки с физикой,
+              реагируют на наклон и встряхивание телефона. Ставится рядом с основной;
+            * `nardy-v1.0.apk` — зафиксированная версия 1.0.
+
+            Разрешите установку из неизвестных источников при первом запросе.
+          files: nardy/nardy-*debug.apk
           make_latest: false

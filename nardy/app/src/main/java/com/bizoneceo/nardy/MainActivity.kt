@@ -9,14 +9,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.window.layout.WindowInfoTracker
 import com.bizoneceo.nardy.platform.NardyViewModel
+import com.bizoneceo.nardy.platform.TiltSensor
 import com.bizoneceo.nardy.platform.toFoldInfo
 import com.bizoneceo.nardy.ui.screen.FoldInfo
 import com.bizoneceo.nardy.ui.screen.NardyApp
-import androidx.window.layout.WindowInfoTracker
 
 class MainActivity : ComponentActivity() {
     private val vm: NardyViewModel by viewModels()
+    private var tiltSensor: TiltSensor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +30,8 @@ class MainActivity : ComponentActivity() {
             if (!vm.model.back()) finish()
         }
 
+        vm.tilt?.let { tiltSensor = TiltSensor(this, it) }
+
         val tracker = WindowInfoTracker.getOrCreate(this)
         setContent {
             val fold by produceState<FoldInfo?>(initialValue = null) {
@@ -35,5 +39,15 @@ class MainActivity : ComponentActivity() {
             }
             NardyApp(vm.model, fold)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        tiltSensor?.start()
+    }
+
+    override fun onPause() {
+        tiltSensor?.stop()
+        super.onPause()
     }
 }

@@ -56,16 +56,18 @@ class GameState private constructor(
     /** Moves made so far this turn. */
     val movesMadeThisTurn: Int get() = undoStack.size
 
-    private val headLimit: Int
-        get() {
-            val firstTurn = turnsPlayed[current.ordinal] == 0
-            val bigDouble = dice.size == 2 && dice[0] == dice[1] && dice[0] in setOf(3, 4, 6)
-            // On the very first throw 6-6, 4-4 and 3-3 cannot be played with a
-            // single head checker, so two may leave the head.
-            return if (variant == Variant.LONG && firstTurn && bigDouble) 2 else 1
-        }
+    /** How many checkers [player] may take from the head when throwing [d1]-[d2]. */
+    internal fun headLimitFor(player: Player, d1: Int, d2: Int): Int {
+        val firstTurn = turnsPlayed[player.ordinal] == 0
+        // On the very first throw 6-6, 4-4 and 3-3 cannot be played with a
+        // single head checker, so two may leave the head.
+        return if (variant == Variant.LONG && firstTurn && d1 == d2 && d1 in setOf(3, 4, 6)) 2 else 1
+    }
 
-    private val context: TurnContext
+    private val headLimit: Int
+        get() = if (dice.size == 2) headLimitFor(current, dice[0], dice[1]) else 1
+
+    internal val context: TurnContext
         get() = TurnContext(position, current, remaining, headMoves, headLimit)
 
     /** Legal next single moves for the current player. */

@@ -73,6 +73,7 @@ import com.bizoneceo.nardy.ui.board.CheckerColors
 import com.bizoneceo.nardy.ui.board.Spot
 import com.bizoneceo.nardy.ui.board.drawBoard
 import com.bizoneceo.nardy.ui.board.drawChecker
+import com.bizoneceo.nardy.ui.board.drawChecker3D
 import com.bizoneceo.nardy.ui.board.drawOffSlab
 import com.bizoneceo.nardy.ui.board.spotOf
 import com.bizoneceo.nardy.ui.board.themeById
@@ -112,8 +113,10 @@ fun GameScreen(
             h - insets.getBottom(density),
         )
         val minPanel = with(density) { 76.dp.toPx() }
-        val layout = remember(state.variant, content, fold, settings.faceToFace, minPanel) {
-            computeGameLayout(state.variant, content, fold, minPanel, settings.faceToFace)
+        // Against the computer nobody sits opposite, so nothing is turned upside down.
+        val faceToFace = settings.faceToFace && controller.aiPlayer == null
+        val layout = remember(state.variant, content, fold, faceToFace, minPanel) {
+            computeGameLayout(state.variant, content, fold, minPanel, faceToFace)
         }
         SideEffect {
             controller.layout = layout
@@ -121,7 +124,7 @@ fun GameScreen(
         }
 
         StaticBoard(layout, theme, w, h)
-        DynamicLayer(controller, layout, theme, settings.faceToFace)
+        DynamicLayer(controller, layout, theme, faceToFace)
 
         for ((player, spec) in layout.panels) {
             PanelHost(spec.rect, spec.upsideDown) {
@@ -137,7 +140,7 @@ fun GameScreen(
 
         if (state.phase == Phase.GAME_OVER || state.phase == Phase.MATCH_OVER) {
             val winner = state.result?.winner ?: Player.WHITE
-            val flip = settings.faceToFace && winner == Player.BLACK && layout.panels[Player.BLACK]?.upsideDown == true
+            val flip = faceToFace && winner == Player.BLACK && layout.panels[Player.BLACK]?.upsideDown == true
             PanelHost(layout.boardRect, flip) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     GameOverCard(controller, theme, onMenu)
@@ -279,19 +282,35 @@ fun DrawScope.drawDynamic(
     val interact = c.canInteract
     val movable = if (interact && c.selected == null && c.drag == null) s.movableFrom else emptySet()
     val labels = ArrayList<Triple<Offset, String, Boolean>>()
+    val world = c.world
+    val cam = c.camera
+    // 3D build: pieces are drawn back to front once all positions are known.
+    val pieces = ArrayList<Pair<Offset, CheckerColors>>()
 
     withBoardTransform(layout) {
         fun ring(center: Offset, color: Color, width: Float, r: Float = radius) =
             drawCircle(color, r + width / 2, center, style = Stroke(width))
+
+        fun place(spot: Spot, i: Int, slot: Offset): Offset =
+            world?.bodies(spot)?.getOrNull(i)?.pos ?: slot
+
+        fun piece(center: Offset, colors: CheckerColors) {
+            if (world != null) pieces += center to colors else drawChecker(center, radius, colors)
+        }
+
+        fun lifted(center: Offset, colors: CheckerColors, lift: Float, alpha: Float = 1f) {
+            if (world != null) drawChecker3D(center, radius, colors, cam, alpha, lift)
+            else drawChecker(center, radius, colors, alpha = alpha, lifted = lift)
+        }
 
         for (abs in 1..24) {
             val owner = pos.ownerAbs(abs) ?: continue
             val spot = Spot.Point(abs)
             val total = GameController.countAt(pos, spot)
             val visible = c.visibleCount(pos, spot)
-            for (i in 0 until visible) drawChecker(g.checkerCenter(abs, i, total), radius, theme.checkers(owner))
+            for (i in 0 until visible) piece(place(spot, i, g.checkerCenter(abs, i, total)), theme.checkers(owner))
             if (visible <= 0) continue
-            val top = g.checkerCenter(abs, visible - 1, total)
+            val top = place(spot, visible - 1, g.checkerCenter(abs, visible - 1, total))
             if (owner == s.current) {
                 val rel = s.variant.rel(s.current, abs)
                 if (rel in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
@@ -307,15 +326,34 @@ fun DrawScope.drawDynamic(
             val bar = Spot.Bar(p)
             val n = pos.bar(p)
             val visible = c.visibleCount(pos, bar)
-            for (i in 0 until visible) drawChecker(g.barCenter(p, i, n), radius, theme.checkers(p))
+            for (i in 0 until visible) piece(place(bar, i, g.barCenter(p, i, n)), theme.checkers(p))
             if (visible > 0) {
-                val top = g.barCenter(p, visible - 1, n)
+                val top = place(bar, visible - 1, g.barCenter(p, visible - 1, n))
                 if (p == s.current && BAR in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
                 if (p == s.current && c.selected == BAR && c.drag == null) ring(top, theme.accent, 0.09f)
                 if (visible > 1) labels += Triple(top, visible.toString(), p == Player.BLACK)
             }
             val off = Spot.Off(p)
             for (i in 0 until c.visibleCount(pos, off)) drawOffSlab(g.offSlab(p, i), theme.checkers(p))
+        }
+
+        if (world != null) {
+            // Nearer the viewer (lower on the board) is drawn last so it overlaps.
+            pieces.sortBy { it.first.y }
+            for ((center, colors) in pieces) drawChecker3D(center, radius, colors, cam)
+            // Highlights were collected before the pieces: draw them again on top.
+            for (abs in 1..24) {
+                val owner = pos.ownerAbs(abs) ?: continue
+                if (owner != s.current) continue
+                val spot = Spot.Point(abs)
+                val visible = c.visibleCount(pos, spot)
+                if (visible <= 0) continue
+                val top = place(spot, visible - 1, g.checkerCenter(abs, visible - 1, GameController.countAt(pos, spot))) +
+                    cam * 0.2f
+                val rel = s.variant.rel(s.current, abs)
+                if (rel in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
+                if (c.selected == rel && c.drag == null) ring(top, theme.accent, 0.09f)
+            }
         }
 
         // Where the selected checker can go.
@@ -329,15 +367,16 @@ fun DrawScope.drawDynamic(
                 drawRoundRect(theme.accent, tray.topLeft, tray.size, CornerRadius(0.12f), style = Stroke(0.07f))
             } else {
                 val at = g.stackTop(spot, GameController.countAt(pos, spot), extra = 1)
-                drawChecker(at, radius, theme.checkers(s.current), alpha = 0.32f)
+                lifted(at, theme.checkers(s.current), 0f, alpha = 0.32f)
                 ring(at, theme.accent.copy(alpha = 0.55f + 0.45f * pulse), 0.07f)
             }
         }
 
         for (f in c.flyers) {
-            drawChecker(f.positionAt(now), radius, theme.checkers(f.player), lifted = f.liftAt(now))
+            lifted(f.positionAt(now), theme.checkers(f.player), f.liftAt(now))
         }
-        c.drag?.let { drawChecker(it.board, radius, theme.checkers(s.current), lifted = 1f) }
+        // In the 3D build a dragged checker slides on the board and shoves the others.
+        c.drag?.let { lifted(it.board, theme.checkers(s.current), if (world != null) 0.15f else 1f) }
     }
 
     // Stack counters, upright for the owner of the stack (black sits opposite in face-to-face mode).
@@ -391,6 +430,23 @@ fun DrawScope.drawDynamic(
 private fun statusFor(c: GameController, player: Player): String {
     val s = c.state
     val mine = s.current == player
+    if (c.aiPlayer == player && mine) {
+        when (s.phase) {
+            Phase.AWAIT_ROLL -> return "Бросает кубики…"
+            Phase.MOVING -> return when {
+                !c.diceSettled -> "Кубики катятся…"
+                c.aiThinking -> "Думает…"
+                s.isBlocked -> "Нет ходов"
+                else -> "Ходит: " + s.dice.joinToString(" · ")
+            }
+            else -> Unit
+        }
+    }
+    if (c.aiPlayer != null && c.aiPlayer != player && !mine &&
+        (s.phase == Phase.AWAIT_ROLL || s.phase == Phase.MOVING)
+    ) {
+        return "Ход компьютера"
+    }
     return when (s.phase) {
         Phase.OPENING_ROLL -> when {
             s.openingDice.size == 2 && s.openingDice[0] == s.openingDice[1] && c.diceSettled ->
@@ -426,7 +482,7 @@ private fun PlayerPanel(
     val s = controller.state
     val active = s.current == player &&
         (s.phase == Phase.MOVING || s.phase == Phase.AWAIT_ROLL) || s.phase == Phase.OPENING_ROLL
-    val canAct = s.current == player && s.phase == Phase.MOVING && controller.diceSettled
+    val canAct = s.current == player && s.phase == Phase.MOVING && controller.diceSettled && controller.aiPlayer != player
     val score = if (s.matchLength > 0) "${s.score(player)} / ${s.matchLength}" else s.score(player).toString()
     val info = "Пипсы ${s.position.pipCount(player)} · Снято ${s.position.off(player)}"
 
@@ -438,7 +494,8 @@ private fun PlayerPanel(
             Spacer(Modifier.width(8.dp))
             Column {
                 Text(
-                    "${playerName(player)}  ·  $score",
+                    (if (controller.aiPlayer == player) "ИИ · ${controller.aiLevel.title}" else playerName(player)) +
+                        "  ·  $score",
                     color = if (active) theme.accent else Color(0xFFBFB3A0),
                     fontWeight = FontWeight.Bold, fontSize = 16.sp, fontFamily = FontFamily.Serif,
                 )
@@ -534,7 +591,11 @@ private fun GameOverCard(c: GameController, theme: BoardTheme, onMenu: () -> Uni
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            (if (matchOver) "Матч: победа — " else "Победа — ") + playerName(r.winner).lowercase(),
+            when {
+                c.aiPlayer == null -> (if (matchOver) "Матч: победа — " else "Победа — ") + playerName(r.winner).lowercase()
+                r.winner == c.aiPlayer -> if (matchOver) "Матч за компьютером" else "Компьютер выиграл"
+                else -> if (matchOver) "Вы выиграли матч!" else "Вы победили!"
+            },
             color = theme.accent, fontSize = 28.sp, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
         )
         Text(kind, color = Color(0xFFF2E6CF), fontSize = 20.sp)
