@@ -18,7 +18,7 @@ on:
         required: false
         default: ""
       release_tag:
-        description: "Also publish a fixed release under this tag, e.g. nardy-v1.0"
+        description: "Also keep this build as nardy-<name>.apk, e.g. v1.0"
         required: false
         default: ""
 
@@ -65,17 +65,18 @@ jobs:
         id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish fixed version release
+      - name: Keep a fixed version next to the latest build
+        if: inputs.release_tag != ''
+        run: cp nardy-debug.apk "nardy-${{ inputs.release_tag }}.apk"
+
+      - name: Publish fixed version
         if: inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag }}
-          target_commitish: ${{ steps.commit.outputs.sha }}
-          name: "Нарды ${{ inputs.release_tag }}"
-          body: |
-            Зафиксированная версия, собрана из коммита ${{ steps.commit.outputs.sha }}.
-            Скачайте APK ниже и установите на телефоне.
-          files: nardy/*.apk
+          # New tags cannot be created from CI in this repository, so fixed
+          # versions are stored as separately named files in the download release.
+          tag_name: nardy-apk-latest
+          files: nardy/nardy-${{ inputs.release_tag }}.apk
           make_latest: false
 
       - name: Publish/refresh download release
