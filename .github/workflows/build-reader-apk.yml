@@ -1,0 +1,58 @@
+name: Build FoldReader APK
+
+on:
+  push:
+    branches:
+      - ccr-86af19c5-vilecm
+    paths:
+      - "reader/**"
+      - "gradle/**"
+      - "gradlew"
+      - "build.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/build-reader-apk.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew :reader:assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp reader/build/outputs/apk/debug/reader-debug.apk foldreader-debug.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: foldreader-apk
+          path: foldreader-debug.apk
+
+      - name: Publish/refresh download release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: foldreader-apk-latest
+          name: "FoldReader (сборка ${{ github.run_number }})"
+          body: |
+            Читалка для Galaxy Fold с реалистичным перелистыванием страниц.
+            Скачайте `foldreader-debug.apk` ниже и установите на телефоне
+            (разрешите установку из неизвестных источников при первом запросе).
+          files: foldreader-debug.apk
+          make_latest: false

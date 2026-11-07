@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Snake8Bit"
 include(":app")
+include(":reader")
