@@ -113,7 +113,6 @@ fun NardyApp(model: AppModel, fold: FoldInfo?) {
                 onSettings = model::updateSettings,
                 onContinue = model::continueGame,
                 onNewGame = model::newGame,
-                physics3d = model.controller.world != null,
             )
             AppScreen.GAME -> GameScreen(
                 controller = model.controller,

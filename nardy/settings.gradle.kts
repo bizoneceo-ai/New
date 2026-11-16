@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "Nardy"
 include(":engine")
 include(":app")
+include(":trainer")

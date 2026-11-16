@@ -7,6 +7,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import com.bizoneceo.nardy.engine.Ai
+import com.bizoneceo.nardy.engine.Analysis
+import com.bizoneceo.nardy.engine.GameReview
+import com.bizoneceo.nardy.engine.TurnRecord
 import com.bizoneceo.nardy.engine.AiLevel
 import com.bizoneceo.nardy.engine.GameState
 import com.bizoneceo.nardy.engine.Move
@@ -19,8 +22,6 @@ import com.bizoneceo.nardy.ui.board.Spot
 import com.bizoneceo.nardy.ui.board.relOf
 import com.bizoneceo.nardy.ui.board.spotOf
 import com.bizoneceo.nardy.ui.dice.DiceListener
-import com.bizoneceo.nardy.ui.physics.CheckerWorld
-import com.bizoneceo.nardy.ui.physics.TiltSource
 import com.bizoneceo.nardy.ui.dice.DiceTray
 import kotlin.concurrent.thread
 import kotlin.math.hypot
@@ -32,8 +33,6 @@ interface Feedback {
     fun checker() {}
     fun tap() {}
     fun victory() {}
-    /** Two checkers (or a checker and a rail) knocking together, 0..1. */
-    fun knock(strength: Float) {}
 }
 
 data class Settings(
@@ -116,21 +115,6 @@ class GameController(
 
     var layout: GameLayout? = null
 
-    /** Physics for the 3D build: null in the classic build. */
-    var world: CheckerWorld? = null
-        private set
-    private var tilt: TiltSource? = null
-
-    /** How the top of a checker shifts per unit of height on screen (3D build). */
-    var camera = Offset(0f, -0.45f)
-        private set
-
-    /** Turns on 3D checkers driven by [tiltSource] (accelerometer). */
-    fun enablePhysics(tiltSource: TiltSource) {
-        tilt = tiltSource
-        world = CheckerWorld().also { w -> w.onImpact = { feedback.knock(it) } }
-    }
-
     /** The side played by the computer, or null for two people. */
     var aiPlayer by mutableStateOf<Player?>(null)
         private set
@@ -201,8 +185,7 @@ class GameController(
     }
 
     val needsFrames: Boolean
-        get() = tray.isBusy || flyers.isNotEmpty() || drag != null || selected != null || canThrow || isAiTurn ||
-            world != null
+        get() = tray.isBusy || flyers.isNotEmpty() || drag != null || selected != null || canThrow || isAiTurn
 
     // ---------------------------------------------------------------- frames
 
@@ -221,35 +204,12 @@ class GameController(
         if (flyers.isNotEmpty()) {
             val done = flyers.filter { it.isDone(nanos) }
             if (done.isNotEmpty()) {
-                world?.let { w ->
-                    for (f in done) {
-                        // Carry the checker's momentum into the stack it lands on.
-                        val a = f.path[maxOf(0, f.path.size - 2)]
-                        val b = f.path.last()
-                        val dir = (b - a).let { if (it.getDistance() < 1e-3f) Offset.Zero else it / it.getDistance() }
-                        w.landed(f.target, dir * 2.5f)
-                    }
-                }
                 flyers.removeAll(done)
                 feedback.checker()
             }
         }
         if (isAiTurn) aiTick(nanos)
-        world?.let { stepPhysics(it, dt) }
         frameNanos = nanos
-    }
-
-    private fun stepPhysics(w: CheckerWorld, dt: Float) {
-        val l = layout ?: return
-        val src = tilt
-        val screen = if (src != null) Offset(src.x, src.y) else Offset.Zero
-        // Screen axes → board axes (the board may be drawn turned by 90°).
-        val board = if (l.transform.rotated) Offset(screen.y, -screen.x) else screen
-        w.gravity = board
-        camera = Offset(0f, -0.45f) - board * 0.6f
-        val pos = state.position
-        w.sync(pos, l.geometry, { visibleCount(pos, it) }, { countAt(pos, it) })
-        w.step(dt, l.geometry.checker / 2, drag?.board)
     }
 
     // ---------------------------------------------------------------- computer
@@ -477,6 +437,7 @@ class GameController(
         flyers += hits
         selected = null
         val before = state.phase
+        turnMoves += route.moves
         update(state.play(route))
         if (before == Phase.MOVING && state.phase != Phase.MOVING) feedback.victory()
     }
@@ -484,6 +445,7 @@ class GameController(
     fun undo() {
         if (!state.canUndo || flyers.isNotEmpty() || isAiTurn) return
         selected = null
+        turnMoves.removeLastOrNull()
         update(state.undo())
         feedback.tap()
     }
@@ -498,14 +460,14 @@ class GameController(
     fun nextGame() {
         if (state.phase != Phase.GAME_OVER) return
         resetAi()
-        world?.clear()
+        clearHistory()
         openingThrow = true
         update(state.nextGame())
     }
 
     fun newMatch(variant: Variant, matchLength: Int, opponent: AiLevel? = aiPlayer?.let { aiLevel }) {
         setOpponent(opponent)
-        world?.clear()
+        clearHistory()
         flyers.clear()
         selected = null
         drag = null
@@ -522,8 +484,49 @@ class GameController(
     }
 
     private fun update(s: GameState) {
+        val before = state
         state = s
+        // Turn log for the post-game review.
+        if (s.phase == Phase.MOVING && turnStart == null) {
+            turnStart = s
+            turnMoves.clear()
+        }
+        if (s.phase != Phase.MOVING) {
+            turnStart?.let { history += TurnRecord(it, turnMoves.toList()) }
+            turnStart = null
+        }
+        if (before.phase == Phase.MOVING && (s.phase == Phase.GAME_OVER || s.phase == Phase.MATCH_OVER)) startReview()
         onStateChanged(s)
+    }
+
+    // ---------------------------------------------------------------- review
+
+    private val history = ArrayList<TurnRecord>()
+    private var turnStart: GameState? = null
+    private val turnMoves = ArrayList<Move>()
+
+    /** Post-game reviews (one per person at the board), null until ready. */
+    var reviews by mutableStateOf<List<GameReview>?>(null)
+        private set
+    private var reviewGeneration = 0
+
+    private fun clearHistory() {
+        history.clear()
+        turnStart = null
+        turnMoves.clear()
+        reviews = null
+        reviewGeneration++
+    }
+
+    private fun startReview() {
+        val log = history.toList()
+        if (log.isEmpty()) return
+        val people = Player.entries.filter { it != aiPlayer }
+        val generation = reviewGeneration
+        thread(isDaemon = true, name = "nardy-review") {
+            val result = runCatching { people.map { Analysis.review(log, it) } }.getOrNull()
+            if (result != null && generation == reviewGeneration) reviews = result
+        }
     }
 
     /** Number of checkers on [spot] that are not still flying in. */

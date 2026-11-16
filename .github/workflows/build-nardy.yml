@@ -52,21 +52,14 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Rename APKs
-        run: |
-          if [ -f app/build/outputs/apk/classic/debug/app-classic-debug.apk ]; then
-            cp app/build/outputs/apk/classic/debug/app-classic-debug.apk nardy-debug.apk
-            cp app/build/outputs/apk/physics/debug/app-physics-debug.apk nardy-3d-debug.apk
-          else
-            # Versions before the 3D test build had a single flavour.
-            cp app/build/outputs/apk/debug/app-debug.apk nardy-debug.apk
-          fi
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk nardy-debug.apk
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: nardy-apk
-          path: nardy/nardy-*debug.apk
+          path: nardy/nardy-debug.apk
 
       - name: Resolve commit
         id: commit
@@ -86,6 +79,13 @@ jobs:
           files: nardy/nardy-${{ inputs.release_tag }}.apk
           make_latest: false
 
+      - name: Remove retired downloads
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The 3D-physics test build was dropped.
+        run: gh release delete-asset nardy-apk-latest nardy-3d-debug.apk --yes --repo "${{ github.repository }}" || true
+
       - name: Publish/refresh download release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
@@ -95,11 +95,9 @@ jobs:
           body: |
             Автоматическая сборка из ветки `${{ github.ref_name }}`.
 
-            * `nardy-debug.apk` — основная версия (игра вдвоём и против ИИ);
-            * `nardy-3d-debug.apk` — тестовая сборка «Нарды 3D»: объёмные фишки с физикой,
-              реагируют на наклон и встряхивание телефона. Ставится рядом с основной;
+            * `nardy-debug.apk` — текущая версия: игра вдвоём и против ИИ, разбор партии;
             * `nardy-v1.0.apk` — зафиксированная версия 1.0.
 
             Разрешите установку из неизвестных источников при первом запросе.
-          files: nardy/nardy-*debug.apk
+          files: nardy/nardy-debug.apk
           make_latest: false

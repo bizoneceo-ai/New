@@ -24,8 +24,88 @@ class TurnPlan(val moves: List<Move>, val result: Position)
  */
 object Ai {
 
+    private val nets = java.util.concurrent.ConcurrentHashMap<Variant, Any>()
+
+    /** The trained evaluator for [variant] bundled as a resource, or null if there is none. */
+    fun netFor(variant: Variant): NeuralNet? {
+        val cached = nets.getOrPut(variant) {
+            Ai::class.java.getResourceAsStream("/nets/${variant.name.lowercase()}.bin")
+                ?.use { NeuralNet.load(it) } ?: Unit
+        }
+        return cached as? NeuralNet
+    }
+
     /** Moves for the current player of [state] (which must be in [Phase.MOVING]). */
     fun chooseTurn(state: GameState, level: AiLevel, random: Random, budgetMillis: Long = 2500): List<Move> {
+        val net = netFor(state.variant) ?: return chooseHeuristic(state, level, random, budgetMillis)
+        check(state.phase == Phase.MOVING)
+        val me = state.current
+        val ev = NetEvaluator(net)
+        val plans = allTurns(state.context)
+        if (plans.isEmpty()) return emptyList()
+        if (plans.size == 1) return plans[0].moves
+        val scored = plans.map { it to ev.equity(it.result, me) }.sortedByDescending { it.second }
+        return when (level) {
+            AiLevel.NOVICE -> {
+                // Plays like a casual player: usually a reasonable move, but
+                // close alternatives are picked almost as often as the best one.
+                val best = scored.first().second
+                val weights = scored.map { kotlin.math.exp((it.second - best) / NOVICE_TEMPERATURE.toDouble()) }
+                var r = random.nextDouble() * weights.sum()
+                var pick = scored.last().first
+                for ((i, w) in weights.withIndex()) {
+                    r -= w
+                    if (r <= 0) {
+                        pick = scored[i].first
+                        break
+                    }
+                }
+                pick.moves
+            }
+            AiLevel.AMATEUR -> scored.first().first.moves
+            AiLevel.MASTER -> {
+                val deadline = System.currentTimeMillis() + budgetMillis
+                var best = scored.first().first
+                var bestValue = Double.NEGATIVE_INFINITY
+                for ((plan, _) in scored.take(MASTER_CANDIDATES)) {
+                    val v = netLookahead(state, plan.result, me, ev, deadline) ?: break
+                    if (v > bestValue) {
+                        bestValue = v
+                        best = plan
+                    }
+                }
+                best.moves
+            }
+        }
+    }
+
+    /** The move a net picks with no lookahead (used for training benchmarks). */
+    fun chooseWithNet(state: GameState, ev: NetEvaluator): List<Move> {
+        val me = state.current
+        return allTurns(state.context).maxByOrNull { ev.equity(it.result, me) }?.moves ?: emptyList()
+    }
+
+    /** Average equity over all 21 opponent throws, each answered with the opponent's best move. */
+    private fun netLookahead(state: GameState, pos: Position, me: Player, ev: NetEvaluator, deadline: Long): Double? {
+        if (pos.off(me) == CHECKERS_PER_PLAYER) return ev.equity(pos, me).toDouble()
+        val opp = me.opponent
+        var total = 0.0
+        for (a in 1..6) for (b in a..6) {
+            if (System.currentTimeMillis() > deadline) return null
+            val dice = if (a == b) List(4) { a } else listOf(a, b)
+            val replies = allTurns(TurnContext(pos, opp, dice, 0, state.headLimitFor(opp, a, b)))
+            val theirBest = if (replies.isEmpty()) -ev.equity(pos, me)
+            else replies.maxOf { ev.equity(it.result, opp) }
+            total += -theirBest * (if (a == b) 1.0 else 2.0)
+        }
+        return total / 36.0
+    }
+
+    private const val NOVICE_TEMPERATURE = 0.12f
+    private const val MASTER_CANDIDATES = 6
+
+    /** The hand-written evaluation (fallback when no trained net is bundled). */
+    fun chooseHeuristic(state: GameState, level: AiLevel, random: Random, budgetMillis: Long = 2500): List<Move> {
         check(state.phase == Phase.MOVING)
         val me = state.current
         val plans = allTurns(state.context)
@@ -35,7 +115,6 @@ object Ai {
         val scored = plans.map { it to evaluate(it.result, me) }.sortedByDescending { it.second }
         return when (level) {
             AiLevel.NOVICE -> {
-                // Plays sensibly most of the time, but often misses the best move.
                 if (random.nextFloat() < 0.35f) scored.random(random).first.moves
                 else scored.take(max(1, min(4, scored.size))).random(random).first.moves
             }

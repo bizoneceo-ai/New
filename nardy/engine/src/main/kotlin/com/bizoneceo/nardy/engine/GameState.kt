@@ -195,14 +195,7 @@ class GameState private constructor(
     private fun finishGame(): GameState {
         val winner = current
         val loser = winner.opponent
-        val kind = when {
-            position.off(loser) > 0 -> WinKind.SINGLE
-            variant == Variant.SHORT && (
-                position.bar(loser) > 0 ||
-                    (19..24).any { position.count(loser, it) > 0 }
-                ) -> WinKind.KOKS
-            else -> WinKind.MARS
-        }
+        val kind = winKindOf(position, winner)
         val res = GameResult(winner, kind)
         val newScores = scores.toMutableList().also { it[winner.ordinal] += res.points }
         val matchOver = matchLength > 0 && newScores[winner.ordinal] >= matchLength

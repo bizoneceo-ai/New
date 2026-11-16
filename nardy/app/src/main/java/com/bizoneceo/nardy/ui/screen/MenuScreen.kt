@@ -70,8 +70,6 @@ fun MenuScreen(
     onSettings: (Settings) -> Unit,
     onContinue: () -> Unit,
     onNewGame: (Variant) -> Unit,
-    /** The 3D-physics test build. */
-    physics3d: Boolean = false,
 ) {
     val theme = themeById(settings.themeId)
     var showRules by remember { mutableStateOf(false) }
@@ -95,13 +93,7 @@ fun MenuScreen(
                 fontWeight = FontWeight.Bold, letterSpacing = 10.sp,
             )
             Text("вдвоём на одном устройстве или против компьютера", color = TextDim, fontSize = 15.sp)
-            if (physics3d) {
-                Text(
-                    "Тестовая сборка: объёмные фишки с физикой — наклоните или встряхните телефон",
-                    color = theme.accent, fontSize = 14.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
+
             Spacer(Modifier.height(18.dp))
 
             if (wide) {

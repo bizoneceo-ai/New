@@ -65,3 +65,15 @@ enum class WinKind(val points: Int) {
 data class GameResult(val winner: Player, val kind: WinKind) {
     val points: Int get() = kind.points
 }
+
+/** How big a win it is when [winner] has just borne off their last checker. */
+fun winKindOf(pos: Position, winner: Player): WinKind {
+    val loser = winner.opponent
+    return when {
+        pos.off(loser) > 0 -> WinKind.SINGLE
+        // Koks exists in short nardy only: a loser checker on the bar or in the winner's home.
+        pos.variant == Variant.SHORT &&
+            (pos.bar(loser) > 0 || (19..24).any { pos.count(loser, it) > 0 }) -> WinKind.KOKS
+        else -> WinKind.MARS
+    }
+}

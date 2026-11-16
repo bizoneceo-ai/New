@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,6 +66,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bizoneceo.nardy.engine.BAR
+import com.bizoneceo.nardy.engine.GameReview
 import com.bizoneceo.nardy.engine.Phase
 import com.bizoneceo.nardy.engine.Player
 import com.bizoneceo.nardy.engine.Variant
@@ -73,7 +76,6 @@ import com.bizoneceo.nardy.ui.board.CheckerColors
 import com.bizoneceo.nardy.ui.board.Spot
 import com.bizoneceo.nardy.ui.board.drawBoard
 import com.bizoneceo.nardy.ui.board.drawChecker
-import com.bizoneceo.nardy.ui.board.drawChecker3D
 import com.bizoneceo.nardy.ui.board.drawOffSlab
 import com.bizoneceo.nardy.ui.board.spotOf
 import com.bizoneceo.nardy.ui.board.themeById
@@ -184,13 +186,34 @@ fun renderStaticBoard(
     width: Int,
     height: Int,
     density: Density,
+    measurer: TextMeasurer,
 ): ImageBitmap {
     val bmp = ImageBitmap(width.coerceAtLeast(1), height.coerceAtLeast(1))
     CanvasDrawScope().draw(density, LayoutDirection.Ltr, GraphicsCanvas(bmp), Size(width.toFloat(), height.toFloat())) {
         layout.trayRect?.let { drawDiceTray(it, theme) }
         withBoardTransform(layout) { drawBoard(layout.geometry, theme) }
+        drawPointNumbers(layout, theme, measurer)
     }
     return bmp
+}
+
+/** Small point numbers on the frame (white's numbering), used by the post-game review. */
+private fun DrawScope.drawPointNumbers(layout: GameLayout, theme: BoardTheme, measurer: TextMeasurer) {
+    val g = layout.geometry
+    val t = layout.transform
+    val px = t.scale * 0.26f
+    val style = TextStyle(
+        fontSize = (px / fontScale / density).sp,
+        color = theme.inlay.copy(alpha = 0.75f),
+        fontWeight = FontWeight.Bold,
+    )
+    for (abs in 1..24) {
+        val x = g.columnCenterX(g.column(abs))
+        val y = if (g.isTop(abs)) g.frame / 2 else g.height - g.frame / 2
+        val c = t.toScreen(Offset(x, y))
+        val m = measurer.measure(abs.toString(), style)
+        drawText(m, topLeft = c - Offset(m.size.width / 2f, m.size.height / 2f))
+    }
 }
 
 private fun DrawScope.drawDiceTray(r: Rect, t: BoardTheme) {
@@ -219,8 +242,9 @@ fun DrawScope.withBoardTransform(layout: GameLayout, block: DrawScope.() -> Unit
 @Composable
 private fun StaticBoard(layout: GameLayout, theme: BoardTheme, w: Float, h: Float) {
     val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
     val bmp = remember(layout, theme, w, h) {
-        renderStaticBoard(layout, theme, w.toInt(), h.toInt(), density)
+        renderStaticBoard(layout, theme, w.toInt(), h.toInt(), density, measurer)
     }
     Canvas(Modifier.fillMaxSize()) { drawImage(bmp) }
 }
@@ -282,35 +306,18 @@ fun DrawScope.drawDynamic(
     val interact = c.canInteract
     val movable = if (interact && c.selected == null && c.drag == null) s.movableFrom else emptySet()
     val labels = ArrayList<Triple<Offset, String, Boolean>>()
-    val world = c.world
-    val cam = c.camera
-    // 3D build: pieces are drawn back to front once all positions are known.
-    val pieces = ArrayList<Pair<Offset, CheckerColors>>()
-
     withBoardTransform(layout) {
         fun ring(center: Offset, color: Color, width: Float, r: Float = radius) =
             drawCircle(color, r + width / 2, center, style = Stroke(width))
-
-        fun place(spot: Spot, i: Int, slot: Offset): Offset =
-            world?.bodies(spot)?.getOrNull(i)?.pos ?: slot
-
-        fun piece(center: Offset, colors: CheckerColors) {
-            if (world != null) pieces += center to colors else drawChecker(center, radius, colors)
-        }
-
-        fun lifted(center: Offset, colors: CheckerColors, lift: Float, alpha: Float = 1f) {
-            if (world != null) drawChecker3D(center, radius, colors, cam, alpha, lift)
-            else drawChecker(center, radius, colors, alpha = alpha, lifted = lift)
-        }
 
         for (abs in 1..24) {
             val owner = pos.ownerAbs(abs) ?: continue
             val spot = Spot.Point(abs)
             val total = GameController.countAt(pos, spot)
             val visible = c.visibleCount(pos, spot)
-            for (i in 0 until visible) piece(place(spot, i, g.checkerCenter(abs, i, total)), theme.checkers(owner))
+            for (i in 0 until visible) drawChecker(g.checkerCenter(abs, i, total), radius, theme.checkers(owner))
             if (visible <= 0) continue
-            val top = place(spot, visible - 1, g.checkerCenter(abs, visible - 1, total))
+            val top = g.checkerCenter(abs, visible - 1, total)
             if (owner == s.current) {
                 val rel = s.variant.rel(s.current, abs)
                 if (rel in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
@@ -326,34 +333,15 @@ fun DrawScope.drawDynamic(
             val bar = Spot.Bar(p)
             val n = pos.bar(p)
             val visible = c.visibleCount(pos, bar)
-            for (i in 0 until visible) piece(place(bar, i, g.barCenter(p, i, n)), theme.checkers(p))
+            for (i in 0 until visible) drawChecker(g.barCenter(p, i, n), radius, theme.checkers(p))
             if (visible > 0) {
-                val top = place(bar, visible - 1, g.barCenter(p, visible - 1, n))
+                val top = g.barCenter(p, visible - 1, n)
                 if (p == s.current && BAR in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
                 if (p == s.current && c.selected == BAR && c.drag == null) ring(top, theme.accent, 0.09f)
                 if (visible > 1) labels += Triple(top, visible.toString(), p == Player.BLACK)
             }
             val off = Spot.Off(p)
             for (i in 0 until c.visibleCount(pos, off)) drawOffSlab(g.offSlab(p, i), theme.checkers(p))
-        }
-
-        if (world != null) {
-            // Nearer the viewer (lower on the board) is drawn last so it overlaps.
-            pieces.sortBy { it.first.y }
-            for ((center, colors) in pieces) drawChecker3D(center, radius, colors, cam)
-            // Highlights were collected before the pieces: draw them again on top.
-            for (abs in 1..24) {
-                val owner = pos.ownerAbs(abs) ?: continue
-                if (owner != s.current) continue
-                val spot = Spot.Point(abs)
-                val visible = c.visibleCount(pos, spot)
-                if (visible <= 0) continue
-                val top = place(spot, visible - 1, g.checkerCenter(abs, visible - 1, GameController.countAt(pos, spot))) +
-                    cam * 0.2f
-                val rel = s.variant.rel(s.current, abs)
-                if (rel in movable) ring(top, theme.accent.copy(alpha = 0.35f + 0.4f * pulse), 0.05f)
-                if (c.selected == rel && c.drag == null) ring(top, theme.accent, 0.09f)
-            }
         }
 
         // Where the selected checker can go.
@@ -367,16 +355,15 @@ fun DrawScope.drawDynamic(
                 drawRoundRect(theme.accent, tray.topLeft, tray.size, CornerRadius(0.12f), style = Stroke(0.07f))
             } else {
                 val at = g.stackTop(spot, GameController.countAt(pos, spot), extra = 1)
-                lifted(at, theme.checkers(s.current), 0f, alpha = 0.32f)
+                drawChecker(at, radius, theme.checkers(s.current), alpha = 0.32f)
                 ring(at, theme.accent.copy(alpha = 0.55f + 0.45f * pulse), 0.07f)
             }
         }
 
         for (f in c.flyers) {
-            lifted(f.positionAt(now), theme.checkers(f.player), f.liftAt(now))
+            drawChecker(f.positionAt(now), radius, theme.checkers(f.player), lifted = f.liftAt(now))
         }
-        // In the 3D build a dragged checker slides on the board and shoves the others.
-        c.drag?.let { lifted(it.board, theme.checkers(s.current), if (world != null) 0.15f else 1f) }
+        c.drag?.let { drawChecker(it.board, radius, theme.checkers(s.current), lifted = 1f) }
     }
 
     // Stack counters, upright for the owner of the stack (black sits opposite in face-to-face mode).
@@ -584,9 +571,12 @@ private fun GameOverCard(c: GameController, theme: BoardTheme, onMenu: () -> Uni
     val matchOver = s.phase == Phase.MATCH_OVER
     Column(
         Modifier
-            .background(Color(0xEE1A120C), RoundedCornerShape(24.dp))
+            .padding(12.dp)
+            .widthIn(max = 620.dp)
+            .background(Color(0xF21A120C), RoundedCornerShape(24.dp))
             .border(2.dp, theme.accent, RoundedCornerShape(24.dp))
-            .padding(28.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -603,6 +593,12 @@ private fun GameOverCard(c: GameController, theme: BoardTheme, onMenu: () -> Uni
             "Счёт  ${s.score(Player.WHITE)} : ${s.score(Player.BLACK)}",
             color = Color(0xFFBFB3A0), fontSize = 16.sp,
         )
+        val reviews = c.reviews
+        if (reviews == null) {
+            Text("Разбираю партию…", color = Color(0xFF9C9080), fontSize = 14.sp)
+        } else {
+            for (review in reviews) ReviewBlock(review, theme, titled = reviews.size > 1)
+        }
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = onMenu) { Text("Меню", color = Color(0xFFBFB3A0)) }
@@ -610,6 +606,45 @@ private fun GameOverCard(c: GameController, theme: BoardTheme, onMenu: () -> Uni
                 onClick = { if (matchOver) c.newMatch(s.variant, s.matchLength) else c.nextGame() },
                 colors = ButtonDefaults.buttonColors(containerColor = theme.accent, contentColor = Color(0xFF1B1410)),
             ) { Text(if (matchOver) "Новый матч" else "Следующая партия", fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+/** Short review of one player: accuracy, style and the costliest moves. */
+@Composable
+private fun ReviewBlock(review: GameReview, theme: BoardTheme, titled: Boolean) {
+    val main = Color(0xFFF2E6CF)
+    val dim = Color(0xFFA89C88)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0x33000000), RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            if (titled) "Разбор: ${playerName(review.player).lowercase()}" else "Разбор вашей игры",
+            color = theme.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+        )
+        Text(
+            "Точность ${review.accuracy}% · ошибок ${review.errors} · грубых ${review.blunders}",
+            color = main, fontSize = 15.sp,
+        )
+        Text("Стиль: ${review.style.title} — ${review.styleNote}", color = main, fontSize = 14.sp)
+        if (review.mistakes.isEmpty()) {
+            Text(
+                if (review.decisions == 0) "Все ходы были вынужденными." else "Серьёзных ошибок нет — отличная партия.",
+                color = dim, fontSize = 14.sp,
+            )
+        } else {
+            Text("Главные ошибки:", color = dim, fontSize = 14.sp)
+            for (m in review.mistakes) {
+                Text(
+                    "Ход ${m.turn} (${m.dice.joinToString("-")}): ${m.played} → лучше ${m.best}  " +
+                        "−${"%.2f".format(m.cost)}",
+                    color = main, fontSize = 13.sp,
+                )
+            }
         }
     }
 }
