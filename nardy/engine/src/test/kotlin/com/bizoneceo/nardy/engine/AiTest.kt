@@ -78,15 +78,31 @@ class AiTest {
     }
 
     @Test
-    fun shortAiHitsAnExposedBlotInItsHome() {
-        // Black blot on black rel 22 (abs 3) sits in white's home; white has
-        // checkers 2 away on abs 5 and plenty elsewhere. Hitting is clearly right.
+    fun heuristicHitsAnExposedBlotInItsHome() {
+        // The hand-written fallback evaluation likes hitting a blot in its home.
+        // (The trained net may rightly prefer building a point here: the blot
+        // is almost at its start, so hitting gains little and invites a return shot.)
         val c = IntArray(24)
         c[5 - 1] = 2; c[6 - 1] = 4; c[8 - 1] = 3; c[13 - 1] = 6
         c[3 - 1] = -1; c[19 - 1] = -4; c[20 - 1] = -4; c[12 - 1] = -6
         val pos = Position.of(Variant.SHORT, c)
         val s = GameState.forPosition(pos, Player.WHITE, listOf(2, 1))
-        val turn = Ai.chooseTurn(s, AiLevel.AMATEUR, Random(1))
+        val turn = Ai.chooseHeuristic(s, AiLevel.AMATEUR, Random(1))
         assertTrue(turn.any { it.hit }, "expected a hit, got $turn")
+    }
+
+    @Test
+    fun trainedNetsPlayClassicOpenings() {
+        // Textbook short-nardy openings: 3-1 and 4-2 make a home point, 6-1 makes the bar point.
+        val expected = mapOf(
+            (3 to 1) to setOf(Move(8, 5, 3), Move(6, 5, 1)),
+            (4 to 2) to setOf(Move(8, 4, 4), Move(6, 4, 2)),
+            (6 to 1) to setOf(Move(13, 7, 6), Move(8, 7, 1)),
+        )
+        for ((dice, moves) in expected) {
+            val s = GameState.newMatch(Variant.SHORT).rollOpening(dice.first, dice.second)
+            val turn = Ai.chooseTurn(s, AiLevel.AMATEUR, Random(1))
+            assertTrue(turn.toSet() == moves, "opening $dice: got ${Analysis.notation(turn, Variant.SHORT, Player.WHITE)}")
+        }
     }
 }
