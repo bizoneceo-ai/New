@@ -637,11 +637,11 @@ private fun ReviewBlock(review: GameReview, theme: BoardTheme, titled: Boolean) 
                 color = dim, fontSize = 14.sp,
             )
         } else {
-            Text("Главные ошибки:", color = dim, fontSize = 14.sp)
+            Text("Главные ошибки (в скобках — сколько очков в среднем стоил ход):", color = dim, fontSize = 13.sp)
             for (m in review.mistakes) {
                 Text(
-                    "Ход ${m.turn} (${m.dice.joinToString("-")}): ${m.played} → лучше ${m.best}  " +
-                        "−${"%.2f".format(m.cost)}",
+                    "Ход ${m.turn} (${m.dice.joinToString("-")}): ${m.played} → лучше ${m.best} " +
+                        "(−${"%.2f".format(m.cost)})",
                     color = main, fontSize = 13.sp,
                 )
             }
