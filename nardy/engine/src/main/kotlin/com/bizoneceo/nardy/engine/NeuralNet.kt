@@ -98,8 +98,15 @@ class NeuralNet(val inputs: Int = INPUTS, val hidden: Int = HIDDEN, val outputs:
     }
 
     companion object {
-        const val INPUTS = 2 * (24 * 4 + 2) + 2
+        /** Board encoding shared by both variants. */
+        const val BASE_INPUTS = 2 * (24 * 4 + 2) + 2
+        /** Extra tactical features used by the short-nardy net. */
+        const val SHORT_EXTRAS = 2 * 5 + 2
+        const val INPUTS = BASE_INPUTS
         const val HIDDEN = 80
+
+        fun inputsFor(variant: Variant): Int =
+            if (variant == Variant.SHORT) BASE_INPUTS + SHORT_EXTRAS else BASE_INPUTS
         const val OUTPUTS = 5
         private const val MAGIC = 0x4E415244 // "NARD"
 
@@ -133,7 +140,51 @@ class NeuralNet(val inputs: Int = INPUTS, val hidden: Int = HIDDEN, val outputs:
                 x[i++] = pos.off(side) / 15f
             }
             x[i++] = pos.pipCount(me) / 200f
-            x[i] = pos.pipCount(me.opponent) / 200f
+            x[i++] = pos.pipCount(me.opponent) / 200f
+            if (x.size >= BASE_INPUTS + SHORT_EXTRAS) shortFeatures(pos, me, x, i)
+        }
+
+        private val SHOTS = intArrayOf(0, 11, 12, 14, 15, 15, 17, 6, 6, 5, 3, 2, 3)
+
+        /**
+         * Hand-made tactical features for short nardy (as in TD-Gammon 2):
+         * direct shots at each side's blots, closed home points, longest prime,
+         * checkers stuck in the opponent's home; plus contact and pip lead.
+         */
+        private fun shortFeatures(pos: Position, me: Player, x: FloatArray, start: Int) {
+            var i = start
+            for (side in listOf(me, me.opponent)) {
+                val opp = side.opponent
+                var shots = 0
+                for (r in 1..24) {
+                    if (pos.count(side, r) != 1) continue
+                    if (pos.bar(opp) > 0 && r <= 12) shots += SHOTS[r]
+                    for (q in 1 until r) {
+                        val d = r - q
+                        if (d <= 12 && pos.count(opp, 25 - q) > 0) shots += SHOTS[d]
+                    }
+                }
+                var home = 0
+                var run = 0
+                var prime = 0
+                for (r in 1..24) {
+                    val made = pos.count(side, r) >= 2
+                    if (made && r <= 6) home++
+                    run = if (made) run + 1 else 0
+                    prime = maxOf(prime, run)
+                }
+                x[i++] = minOf(1f, shots / 36f)
+                x[i++] = home / 6f
+                x[i++] = prime / 6f
+                x[i++] = (19..24).sumOf { pos.count(side, it) } / 15f
+                x[i++] = if (pos.bar(side) > 0) 1f else 0f
+            }
+            val contact = pos.highestRel(Player.WHITE).let { w ->
+                val b = pos.highestRel(Player.BLACK)
+                w == BAR || b == BAR || (w != 0 && b != 0 && w + b > 25)
+            }
+            x[i++] = if (contact) 1f else 0f
+            x[i] = (pos.pipCount(me.opponent) - pos.pipCount(me)) / 50f
         }
 
         /** Expected points for "me" from the five outputs. */

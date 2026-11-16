@@ -21,7 +21,7 @@ import kotlin.random.Random
 /**
  * Trains a position evaluator by TD(0) self-play.
  *
- * Usage: trainer <SHORT|LONG> <games> <out.bin> [threads]
+ * Usage: trainer <SHORT|LONG> <games> <out.bin> [threads] [hidden]
  * Continues from <out.bin> if it already exists.
  */
 fun main(args: Array<String>) {
@@ -31,7 +31,8 @@ fun main(args: Array<String>) {
     val threads = args.getOrNull(3)?.toInt() ?: Runtime.getRuntime().availableProcessors()
 
     val net = if (out.exists()) out.inputStream().use { NeuralNet.load(it) }
-    else NeuralNet().also { it.randomize(Random(1)) }
+    else NeuralNet(NeuralNet.inputsFor(variant), args.getOrNull(4)?.toInt() ?: NeuralNet.HIDDEN)
+        .also { it.randomize(Random(1)) }
     println("training $variant for $games games on $threads threads, from ${if (out.exists()) "checkpoint" else "scratch"}")
 
     val counter = AtomicInteger()
